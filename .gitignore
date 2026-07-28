@@ -1,0 +1,4 @@
+node_modules/
+logs/evolution-log.json
+server/p  ending/
+*.db
