@@ -1,0 +1,27 @@
+{
+  "module": "web-shell",
+  "role": "browser-entry",
+  "evolution_policy": "locked",
+  "locked_reason": "The browser entry controls application bootstrapping and may load evolvable presentation code without granting it server capabilities.",
+  "owns": [
+    "web/**"
+  ],
+  "exposes": {
+    "index.html": "browser document entry",
+    "main.jsx": "React mount point"
+  },
+  "depends_on": [
+    "ui"
+  ],
+  "invariants": [
+    "contains no protected database or alarm logic",
+    "mounts the declared UI application root"
+  ],
+  "file_policies": {
+    "module.json": "human-review",
+    "index.html": "locked",
+    "main.jsx": "locked"
+  },
+  "version": "1.0.0",
+  "last_updated": "2026-07-31"
+}

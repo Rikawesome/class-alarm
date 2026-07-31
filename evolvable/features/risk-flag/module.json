@@ -1,0 +1,39 @@
+{
+  "module": "risk-flag",
+  "role": "feature",
+  "evolution_policy": "evolvable",
+  "owns": [
+    "evolvable/features/risk-flag/**"
+  ],
+  "exposes": {
+    "isRisky": "(courseId: string) -> boolean",
+    "getAlarmDisplayData": "(course: Course) -> { title: string, body: string }"
+  },
+  "implements": {
+    "alarm-engine.alarmDisplayFormatter": "getAlarmDisplayData"
+  },
+  "depends_on": [],
+  "consumed_by": [
+    "app-runtime"
+  ],
+  "evolvable_surface": [
+    "risk definition logic",
+    "alarm display text and formatting"
+  ],
+  "fixed_interfaces": [
+    "isRisky signature",
+    "getAlarmDisplayData signature and return shape"
+  ],
+  "file_policies": {
+    "module.json": "human-review",
+    "index.js": "evolvable",
+    "tests/**": "evolvable-additive"
+  },
+  "test_policy": {
+    "owner": "risk-flag",
+    "existing_tests": "protected-baseline",
+    "new_tests": "evolvable-additive"
+  },
+  "version": "1.2.0",
+  "last_updated": "2026-07-31"
+}

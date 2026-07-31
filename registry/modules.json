@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.0.0",
+  "modules": {
+    "core-data": {
+      "path": "locked/core-data",
+      "contract": "locked/core-data/module.json",
+      "role": "protected-core",
+      "evolution_policy": "locked"
+    },
+    "alarm-engine": {
+      "path": "locked/alarm-engine",
+      "contract": "locked/alarm-engine/module.json",
+      "role": "protected-core",
+      "evolution_policy": "locked"
+    },
+    "risk-flag": {
+      "path": "evolvable/features/risk-flag",
+      "contract": "evolvable/features/risk-flag/module.json",
+      "role": "feature",
+      "evolution_policy": "evolvable"
+    },
+    "ui": {
+      "path": "evolvable/ui",
+      "contract": "evolvable/ui/module.json",
+      "role": "presentation",
+      "evolution_policy": "evolvable"
+    },
+    "app-runtime": {
+      "path": "app",
+      "contract": "app/module.json",
+      "role": "composition-root",
+      "evolution_policy": "locked"
+    },
+    "web-shell": {
+      "path": "web",
+      "contract": "web/module.json",
+      "role": "browser-entry",
+      "evolution_policy": "locked"
+    },
+    "evolution-server": {
+      "path": "server",
+      "contract": "server/module.json",
+      "role": "evolution-control-plane",
+      "evolution_policy": "locked"
+    },
+    "governance": {
+      "path": "governance",
+      "contract": "governance/module.json",
+      "role": "governance-control-plane",
+      "evolution_policy": "locked"
+    }
+  },
+  "artifacts": {
+    "course-database": {
+      "path": "data/",
+      "owner": "core-data",
+      "kind": "runtime-state",
+      "write_policy": "owner-only"
+    },
+    "evolution-log": {
+      "path": "logs/",
+      "owner": "evolution-server",
+      "kind": "append-only-audit",
+      "write_policy": "owner-only"
+    },
+    "pending-proposals": {
+      "path": "server/pending/",
+      "owner": "evolution-server",
+      "kind": "generated-artifact",
+      "write_policy": "owner-only"
+    },
+    "module-registry": {
+      "path": "registry/",
+      "owner": "governance",
+      "kind": "governance-index",
+      "write_policy": "human-review"
+    },
+    "documentation": {
+      "path": "docs/",
+      "owner": "governance",
+      "kind": "human-knowledge",
+      "write_policy": "human-review"
+    },
+    "build-configuration": {
+      "paths": [
+        "package.json",
+        "package-lock.json",
+        "vite.config.js"
+      ],
+      "owner": "app-runtime",
+      "kind": "build-infrastructure",
+      "write_policy": "human-review"
+    }
+  }
+}

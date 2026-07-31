@@ -1,4 +1,6 @@
 node_modules/
 logs/evolution-log.json
-server/p  ending/
+server/pending/
 *.db
+*.db-*
+dist/

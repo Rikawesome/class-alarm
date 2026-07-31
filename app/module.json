@@ -1,0 +1,36 @@
+{
+  "module": "app-runtime",
+  "role": "composition-root",
+  "evolution_policy": "locked",
+  "locked_reason": "The composition root controls which evolvable implementations receive protected capabilities and remains human-reviewed in Version 1.",
+  "owns": [
+    "app/**"
+  ],
+  "exposes": {
+    "GET /api/bootstrap": "read-only course and runtime state",
+    "GET /api/events": "alarm notification event stream",
+    "POST /api/alarms/test": "fire a non-scheduled demonstration notification"
+  },
+  "depends_on": [
+    "core-data",
+    "alarm-engine",
+    "risk-flag"
+  ],
+  "invariants": [
+    "evolvable modules receive no database implementation",
+    "the application runs without the evolution server",
+    "scheduled alarm timing remains owned by alarm-engine"
+  ],
+  "file_policies": {
+    "module.json": "human-review",
+    "*.js": "locked",
+    "tests/**": "locked"
+  },
+  "test_policy": {
+    "owner": "app-runtime",
+    "existing_tests": "locked",
+    "new_tests": "human-review"
+  },
+  "version": "1.1.0",
+  "last_updated": "2026-07-31"
+}

@@ -1,0 +1,37 @@
+{
+  "module": "alarm-engine",
+  "role": "protected-core",
+  "evolution_policy": "locked",
+  "locked_reason": "Alarm scheduling and delivery must remain available even when an evolvable feature is invalid or unavailable.",
+  "owns": [
+    "locked/alarm-engine/**"
+  ],
+  "exposes": {
+    "scheduleTodaysAlarms": "(notify: function, alarmDisplayFormatter?: function, runtime?: object) -> ScheduledAlarm[]",
+    "scheduleCourseAlarms": "(courses: Course[], notify: function, alarmDisplayFormatter?: function, runtime?: object) -> ScheduledAlarm[]"
+  },
+  "accepts": {
+    "alarmDisplayFormatter": "(course: Course) -> { title: string, body: string }"
+  },
+  "depends_on": [
+    "core-data"
+  ],
+  "invariants": [
+    "never imports an evolvable module",
+    "formatter errors or invalid output fall back to locked display data",
+    "an evolvable formatter cannot decide whether or when an alarm fires",
+    "only future courses on the current local day are scheduled"
+  ],
+  "file_policies": {
+    "module.json": "human-review",
+    "*.js": "locked",
+    "tests/**": "locked"
+  },
+  "test_policy": {
+    "owner": "alarm-engine",
+    "existing_tests": "locked",
+    "new_tests": "human-review"
+  },
+  "version": "1.2.0",
+  "last_updated": "2026-07-31"
+}

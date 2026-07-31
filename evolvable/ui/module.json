@@ -1,0 +1,40 @@
+{
+  "module": "ui",
+  "role": "presentation",
+  "evolution_policy": "evolvable",
+  "owns": [
+    "evolvable/ui/**"
+  ],
+  "exposes": {
+    "App": "React application root",
+    "CourseList": "React course timetable component"
+  },
+  "depends_on": [
+    "risk-flag",
+    "app-runtime"
+  ],
+  "evolvable_surface": [
+    "layout",
+    "colors",
+    "labels",
+    "presentation components",
+    "controls that call declared application APIs"
+  ],
+  "invariants": [
+    "never imports protected database or scheduling implementations",
+    "never writes runtime data except through declared application APIs"
+  ],
+  "file_policies": {
+    "module.json": "human-review",
+    "*.jsx": "evolvable",
+    "*.css": "evolvable",
+    "tests/**": "evolvable-additive"
+  },
+  "test_policy": {
+    "owner": "ui",
+    "existing_tests": "protected-baseline",
+    "new_tests": "evolvable-additive"
+  },
+  "version": "1.0.0",
+  "last_updated": "2026-07-31"
+}

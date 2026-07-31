@@ -1,0 +1,28 @@
+{
+  "module": "evolution-server",
+  "role": "evolution-control-plane",
+  "evolution_policy": "locked",
+  "locked_reason": "The evolution server interprets requests, reads governance rules, and decides whether generated changes may proceed.",
+  "owns": [
+    "server/**",
+    "logs/evolution-log.json"
+  ],
+  "exposes": {
+    "POST /evolve": "create and classify an evolution proposal"
+  },
+  "depends_on": [
+    "governance"
+  ],
+  "invariants": [
+    "loads canonical contracts through registry/modules.json",
+    "never treats generated output as trusted code",
+    "records every evolution attempt"
+  ],
+  "file_policies": {
+    "module.json": "human-review",
+    "*.py": "locked",
+    "pending/**": "generated-artifact"
+  },
+  "version": "1.0.0",
+  "last_updated": "2026-07-31"
+}

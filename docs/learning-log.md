@@ -64,3 +64,117 @@ The same pattern applies anywhere optional behavior surrounds critical behavior:
 
 The transferable rule is to inject optional policy or presentation behind a stable
 contract, validate its output, and preserve a locked fallback.
+
+---
+
+## 2026-07-31 - Establish a runnable and persistent seed application
+
+**1. What this teaches the system**
+
+Safe evolution requires a concrete working state to preserve. Contracts alone cannot
+show whether an evolution retained storage, scheduling, delivery, and user-facing
+behavior. The baseline application therefore becomes the executable reference point
+against which future changes are validated.
+
+This step also establishes the composition-root pattern. Locked and evolvable
+modules remain independent, while a small human-reviewed host is responsible for
+wiring implementations together and deciding which protected capabilities are
+available.
+
+**2. How we implemented it**
+
+The protected core now owns a file-backed SQLite database, creates the course table,
+and inserts sample courses only when the table is empty. Course reads continue to
+flow through the protected accessor. Automated tests modify the database between two
+separate Node processes and verify that the modified value survives the restart.
+
+The alarm engine now returns cancellable schedule metadata while retaining ownership
+of timing and safe display fallback. The application runtime injects the evolvable
+risk formatter, records delivered alarms, refreshes the schedule each day, and
+exposes read-only state plus a test-alarm action through an HTTP API.
+
+A React interface displays the weekly timetable, runtime state, next alarm, risk
+flags, and recent deliveries. The interface receives data through the host API and
+does not import protected storage or scheduling modules. Scheduler, persistence,
+HTTP integration, module-boundary, and production-build checks provide the evidence
+for this baseline.
+
+**3. How it applies elsewhere**
+
+The same baseline-first approach applies to other evolvable applications:
+
+- A finance application needs a working ledger and reconciliation test before
+  allowing reports or categorization rules to evolve.
+- A health application needs a protected medication schedule and delivery record
+  before allowing reminder wording or planning views to evolve.
+- A project-management application needs stable task persistence and state
+  transitions before allowing dashboards and planning modules to evolve.
+
+The transferable rule is to make the protected behavior executable, persist its
+state, expose it through narrow capabilities, and measure every later evolution
+against that known-good baseline.
+
+
+
+  ## 2026-07-31 - Refactor tests to enforce module boundaries and colocate with locked modules
+
+  1. What this teaches the system
+
+  The system now enforces a strict architectural boundary where locked modules (protected-core)
+  must not import evolvable code. By moving tests into the locked module directories and updating
+  import paths, we ensure that tests validate the locked modules' behavior without evolving
+  dependencies, and we prevent accidental coupling to evolvable code. This establishes an
+  invariant: locked modules are self-contained and only depend on other locked modules or node
+  built-ins.
+
+  2. How we implemented it
+
+  - Moved test files from the root tests/ directory into the appropriate locked module
+    directories:
+      - tests/alarm-display.test.js → locked/alarm-engine/tests/alarm-display.test.js
+      - tests/scheduler.test.js → locked/alarm-engine/tests/scheduler.test.js
+      - tests/core-data.test.js → locked/core-data/tests/core-data.test.js
+
+  - Created new test suites:
+      - app/tests/application-server.test.js (integration test for the composed runtime and
+        server)
+
+      - governance/tests/dependency-boundaries.test.js (validates that no locked module imports
+        evolvable code via a regex scan)
+
+      - governance/tests/registry-integrity.test.js (ensures the module registry entries resolve
+        to correct local contracts and have no duplicate contracts)
+
+  - Updated import paths in app/runtime.js and app/server.js to use correct relative paths after
+    moving the app source from data/app to app root.
+
+  - Removed the old tests/ directory and the temporary data/app location.
+  - All tests now pass, confirming the architectural constraints hold.
+
+  3. How it applies elsewhere
+
+  This pattern of colocating tests with the modules they test, especially for locked/core modules,
+  can be applied to other subsystems (e.g., the evolution server, web shell, or UI features). For
+  any module that has a strict evolution policy (locked or evolvable), placing its tests alongside
+  its source encourages developers to think about the module's public contract and prevents tests
+  from depending on unstable internals. Additionally, the governance test for dependency
+  boundaries can be extended to enforce other constraints, such as forbidding certain imports or
+  requiring specific file policies, making it a scalable guardrail for the architecture.
+## 2026-07-31 - Ensure baseline completeness before testing software evolution
+
+**1. What this teaches the system**
+
+Evolution is meant for user-driven enhancements, customizations, and additive capabilities, not as a substitute for basic product usability. Treating core missing functionality (such as course creation or deletion) as an "evolution" misuses the architectural paradigm. A robust baseline application must be fully usable out-of-the-box for its core domain while keeping database access guarded by strict protected schema validation.
+
+**2. How we implemented it**
+
+We added validated `createCourse` and `deleteCourse` operations to the protected core (`locked/core-data/access.js`), complete with strict input checks for names, valid days (0–6), and 24-hour time formatting. The application composition root (`app/runtime.js` and `app/server.js`) exposed safe host endpoints (`POST /api/courses` and `DELETE /api/courses/:id`), which trigger automatic alarm rescheduling. The evolvable UI (`evolvable/ui/App.jsx` and `CourseList.jsx`) gained an interactive "Add class" modal and course deletion controls, communicating exclusively through the host API without directly importing database storage or schemas. Unit tests and production build verification confirm that core safety invariants and persistence remain fully intact.
+
+**3. How it applies elsewhere**
+
+This principle applies across all evolvable software architectures:
+- A finance baseline must allow basic ledger transactions before testing custom reporting rules.
+- A health reminder baseline must allow core medication management before testing custom motivation features.
+- A project management baseline must allow basic task CRUD before testing automated workflow boards.
+
+The transferable rule is to ensure the baseline satisfies its core product domain completeness safely through validated core accessors, ensuring that subsequent evolution cycles measure true capability growth rather than patching missing foundational features.

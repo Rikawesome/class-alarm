@@ -1,0 +1,31 @@
+{
+  "module": "governance",
+  "role": "governance-control-plane",
+  "evolution_policy": "locked",
+  "locked_reason": "Governance defines module ownership, change authority, and the invariant tests used to judge generated proposals.",
+  "owns": [
+    "registry/**",
+    "governance/**"
+  ],
+  "exposes": {
+    "registry/modules.json": "module discovery, ownership, and policy index"
+  },
+  "depends_on": [],
+  "invariants": [
+    "every registered module has one canonical local contract",
+    "registry entries and local contracts agree on identity and policy",
+    "protected invariant tests cannot be modified by evolution requests"
+  ],
+  "file_policies": {
+    "module.json": "human-review",
+    "tests/**": "locked",
+    "../registry/**": "human-review"
+  },
+  "test_policy": {
+    "owner": "governance",
+    "existing_tests": "locked",
+    "new_tests": "human-review"
+  },
+  "version": "1.0.0",
+  "last_updated": "2026-07-31"
+}

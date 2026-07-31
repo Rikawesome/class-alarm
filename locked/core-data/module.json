@@ -1,0 +1,37 @@
+{
+  "module": "core-data",
+  "role": "protected-core",
+  "evolution_policy": "locked",
+  "locked_reason": "Single source of truth for timetable data. Changing its schema or write rules affects every module that consumes courses.",
+  "owns": [
+    "locked/core-data/**",
+    "data/class-alarm.db"
+  ],
+  "exposes": {
+    "getAllCourses": "() -> Course[]",
+    "getCourseById": "(id: string) -> Course | null"
+  },
+  "depends_on": [],
+  "storage": {
+    "engine": "SQLite",
+    "default_path": "data/class-alarm.db",
+    "seed_behavior": "insert sample courses only when the courses table is empty"
+  },
+  "invariants": [
+    "course data survives application restarts",
+    "evolvable modules never import db.js or schema.js",
+    "evolvable modules receive no direct course-data write capability"
+  ],
+  "file_policies": {
+    "module.json": "human-review",
+    "*.js": "locked",
+    "tests/**": "locked"
+  },
+  "test_policy": {
+    "owner": "core-data",
+    "existing_tests": "locked",
+    "new_tests": "human-review"
+  },
+  "version": "1.2.0",
+  "last_updated": "2026-07-31"
+}
