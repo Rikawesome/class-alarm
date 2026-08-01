@@ -13,6 +13,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import CourseList from "./CourseList.jsx";
+import { Topbar } from "./Topbar.jsx";
 
 const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
   weekday: "long",
@@ -198,6 +199,20 @@ export default function App() {
     }
   }
 
+  async function handleToggleRisk(courseId, isRisky) {
+    try {
+      const data = await requestJson(`/api/courses/${courseId}/risk`, {
+        method: "POST",
+        body: JSON.stringify({ is_risky: isRisky }),
+      });
+      setCourses(data.courses);
+      setRuntime(data.runtime);
+      setError("");
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function triggerTestAlarm(courseId) {
     setTestingCourseId(courseId ?? "next");
 
@@ -264,6 +279,7 @@ export default function App() {
       </aside>
 
       <div className="app-main">
+        <Topbar />
         <header className="topbar">
           <div>
             <p className="date-label">{DATE_FORMATTER.format(currentTime)}</p>
@@ -367,6 +383,7 @@ export default function App() {
                   testingCourseId={testingCourseId}
                   onTestAlarm={triggerTestAlarm}
                   onDeleteCourse={handleDeleteCourse}
+                  onToggleRisk={handleToggleRisk}
                 />
               )}
             </section>

@@ -898,3 +898,20 @@ button:disabled {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
+
+.interactive-badge {
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: opacity 0.2s;
+}
+
+.interactive-badge:hover {
+  opacity: 0.8;
+}

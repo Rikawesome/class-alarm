@@ -4,7 +4,7 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 
-import { getAlarmDisplayData, isRisky } from "../evolvable/features/risk-flag/index.js";
+import { getAlarmDisplayData, isRisky, setRisky } from "../evolvable/features/risk-flag/index.js";
 import { getSafeAlarmDisplayData } from "../locked/alarm-engine/alarm-display.js";
 import { scheduleCourseAlarms } from "../locked/alarm-engine/scheduler.js";
 import { getAllCourses, createCourse, deleteCourse } from "../locked/core-data/access.js";
@@ -51,6 +51,21 @@ export function createClassAlarmRuntime({
     const course = deleteCourse(courseId);
     reschedule();
     return course;
+  }
+
+  function toggleCourseRisk(courseId, risky) {
+    setRisky(courseId, risky);
+    reschedule();
+    return listCourses().find((c) => c.id === courseId);
+  }
+
+  function importCourses(coursesList) {
+    const created = [];
+    for (const c of coursesList) {
+      created.push(createCourse(c));
+    }
+    reschedule();
+    return created;
   }
 
   function recordNotification(displayData, course, source) {
@@ -184,12 +199,14 @@ export function createClassAlarmRuntime({
   return {
     addCourse,
     getSnapshot,
+    importCourses,
     listCourses,
     onNotification,
     removeCourse,
     reschedule,
     start,
     stop,
+    toggleCourseRisk,
     triggerTestAlarm,
   };
 }

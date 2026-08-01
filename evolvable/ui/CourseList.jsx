@@ -55,6 +55,7 @@ export default function CourseList({
   testingCourseId,
   onTestAlarm,
   onDeleteCourse,
+  onToggleRisk,
 }) {
   const now = new Date();
   const sortedCourses = [...courses].sort(
@@ -102,14 +103,21 @@ export default function CourseList({
                 {course.start_time}–{course.end_time}
               </span>
               <span>
-                {risky ? (
-                  <span className="risk-badge">
-                    <AlertTriangle size={14} />
-                    Risk flag
-                  </span>
-                ) : (
-                  <span className="standard-status">Standard</span>
-                )}
+                <button
+                  type="button"
+                  className={risky ? "risk-badge interactive-badge" : "standard-status interactive-badge"}
+                  title="Click to toggle risk flag"
+                  onClick={() => onToggleRisk(course.id, !risky)}
+                >
+                  {risky ? (
+                    <>
+                      <AlertTriangle size={14} />
+                      Risk flag
+                    </>
+                  ) : (
+                    "Standard"
+                  )}
+                </button>
               </span>
               <div className="row-actions">
                 <button

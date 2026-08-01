@@ -178,3 +178,92 @@ This principle applies across all evolvable software architectures:
 - A project management baseline must allow basic task CRUD before testing automated workflow boards.
 
 The transferable rule is to ensure the baseline satisfies its core product domain completeness safely through validated core accessors, ensuring that subsequent evolution cycles measure true capability growth rather than patching missing foundational features.
+
+## 2026-07-31 - Produce trustworthy change proposals via structured Gemini validation gates
+
+**1. What this teaches the system**
+
+Natural language code evolution requires strict mechanical guardrails before proposals can touch code. Allowing unstructured LLM output risks unvalidated file modifications, path traversals, or accidental edits to protected core modules (`locked/`). By enforcing strict JSON schemas (via Pydantic) and zero-mutation proposal storage (`server/pending/`), generated changes remain completely untrusted until evaluated against boundaries and contracts.
+
+**2. How we implemented it**
+
+We integrated a configurable Google Gemini model using the Google GenAI SDK with structured response validation (`response_schema=ProposalOutput`). The current default is `gemini-3.5-flash-lite`, and deployments may override it with `DARWIN_MODEL`. The evolution server (`server/main.py`) validates requested file paths against path traversal attacks, evaluates fast-path vs. full-path eligibility, stores pending proposals in `server/pending/{id}.json`, records all successes and failures in `logs/evolution-log.json`, and leaves working application files untouched during generation. A comprehensive test suite (`server/tests/test_server.py`) verifies proposal generation, schema enforcement, failure logging, and inspection APIs.
+
+---
+
+## 2026-08-05 - Restore the registry as the proposal engine's source of truth
+
+**1. What this teaches the system**
+
+A module registry protects architectural boundaries only when every consumer loads
+contracts through that registry. Keeping an obsolete secondary contract location in
+code or documentation creates silent policy drift: the proposal engine can appear
+healthy while receiving no actual module constraints.
+
+**2. How we implemented it**
+
+The evolution server now resolves every colocated `module.json` through
+`registry/modules.json`, verifies that contract paths remain inside the workspace,
+and checks that each contract identity matches its registry key. The generation
+prompt now preserves the stronger rule that evolvable modules use declared
+application APIs and never import from `locked/`.
+
+The application, core-data, and evolution-server contracts were synchronized with
+their implemented APIs. Roadmap and README references now point to the canonical
+registry layout, and regression tests verify that all registered contracts are
+loaded into the proposal prompt.
+
+**3. How it applies elsewhere**
+
+Any policy-driven system needs one canonical discovery mechanism. Authorization
+rules, plugin manifests, schema registries, and deployment inventories become
+unreliable when runtime code scans a stale directory or bypasses identity checks.
+Consumers should resolve policy through the canonical index and fail explicitly
+when indexed metadata is missing or inconsistent.
+
+**3. How it applies elsewhere**
+
+The same proposal-isolation pattern applies to any safe agentic architecture:
+- An infrastructure automation agent must generate Terraform/Kubernetes change plans as inspectable review artifacts rather than applying live updates blindly.
+- A database migration assistant must validate DDL statements against schema contracts before running migrations.
+- A code refactoring copilot must output isolated unified diffs for review rather than modifying source files directly.
+
+The transferable rule is to generate evolution requests as structured, reviewable artifacts with explicit validation schemas, keeping the working system immutable until review gates pass.
+
+---
+
+## 2026-08-05 - Step 5: Transactional Patch Application with Automatic Rollback
+
+**1. What this teaches the system**
+
+Validating a proposal in isolation is necessary, but applying it safely requires transactional execution. If a post-application check (syntax check, production build, or test suite) fails after file modifications, the system must atomically restore previous state rather than leaving the codebase in a broken state.
+
+**2. How we implemented it**
+
+We added `apply_proposal()` and the `POST /proposals/{request_id}/apply` endpoint to the evolution control plane (`server/main.py`). The implementation:
+- Automatically validates the proposal against Step 4 gates.
+- Snapshots target files before applying changes (`create`, `modify`, `delete`).
+- Re-runs syntax verification (`node --check`), production bundle generation (`npm run build`), and the full test suite (`node --test`).
+- Automatically rolls back workspace modifications and marks status as `rolled_back` if any check fails, or marks status as `applied` and logs success to `logs/evolution-log.json` if all checks pass.
+
+**3. How it applies elsewhere**
+
+Transactional deployment patterns with automatic rollback are standard in database migrations, container orchestration, and continuous deployment pipelines. Applying them to AI code generation ensures that automated self-evolution can never corrupt or break a stable runtime baseline.
+
+---
+
+## 2026-08-05 - Policy 001 & Upgraded Engineering Workflow Pipeline
+
+**1. What this teaches the system**
+
+AI code generation fails when treated as a single prompt-response black box. Generating isolated component files without mounting them in the composition root (`App.jsx`) results in functional "orphaned components" that compile successfully but fail to appear in the application. Furthermore, the core hypothesis shifts from *"Can AI generate software?"* to *"Can software evolution become an engineered workflow?"*
+
+**2. How we implemented it**
+
+- **Upgraded Evolution Pipeline**: Formalized the pipeline into distinct stages: `Intent -> Context Assembly -> Evolution Plan (Step 3A) -> Plan Validation -> Code Generation (Step 3B) -> Code Validation (Step 4) -> Transactional Apply (Step 5)`.
+- **Policy 001**: Added explicit architectural policy: **"Any newly created file must be explicitly imported, mounted, or registered in an existing module or composition root. Orphaned files of any type are strictly forbidden."**
+- **Evolution Planner Role**: The AI now acts as an Evolution Planner before writing any code, ensuring integration points and wiring paths are explicitly accounted for.
+
+**3. How it applies elsewhere**
+
+Engineering autonomous systems requires treating changes as multi-step compilation pipelines—intent analysis, architectural planning, static validation, isolated testing, and transactional deployment—rather than trusting raw LLM output.

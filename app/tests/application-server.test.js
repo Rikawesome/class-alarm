@@ -75,3 +75,39 @@ test("delivers a test alarm through the composed formatter", async () => {
     body.notification.id,
   );
 });
+
+test("allows creating, toggling risk, and deleting courses through API", async () => {
+  // Create course
+  const createRes = await fetch(`${baseUrl}/api/courses`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: "Quantum Mechanics",
+      day_of_week: 3,
+      start_time: "11:00",
+      end_time: "12:30"
+    })
+  });
+  const createData = await createRes.json();
+  assert.equal(createRes.status, 201);
+  assert.equal(createData.course.name, "Quantum Mechanics");
+  const courseId = createData.course.id;
+
+  // Toggle risk
+  const riskRes = await fetch(`${baseUrl}/api/courses/${courseId}/risk`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ is_risky: true })
+  });
+  const riskData = await riskRes.json();
+  assert.equal(riskRes.status, 200);
+  assert.equal(riskData.course.is_risky, true);
+
+  // Delete course
+  const deleteRes = await fetch(`${baseUrl}/api/courses/${courseId}`, {
+    method: "DELETE"
+  });
+  const deleteData = await deleteRes.json();
+  assert.equal(deleteRes.status, 200);
+  assert.equal(deleteData.course.id, courseId);
+});

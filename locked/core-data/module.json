@@ -9,7 +9,9 @@
   ],
   "exposes": {
     "getAllCourses": "() -> Course[]",
-    "getCourseById": "(id: string) -> Course | null"
+    "getCourseById": "(id: string) -> Course | null",
+    "createCourse": "(courseData: CourseInput) -> Course",
+    "deleteCourse": "(id: string) -> Course"
   },
   "depends_on": [],
   "storage": {
@@ -20,7 +22,7 @@
   "invariants": [
     "course data survives application restarts",
     "evolvable modules never import db.js or schema.js",
-    "evolvable modules receive no direct course-data write capability"
+    "evolvable modules receive no direct database or core-data accessor capability"
   ],
   "file_policies": {
     "module.json": "human-review",
@@ -32,6 +34,6 @@
     "existing_tests": "locked",
     "new_tests": "human-review"
   },
-  "version": "1.2.0",
-  "last_updated": "2026-07-31"
+  "version": "1.3.0",
+  "last_updated": "2026-08-05"
 }

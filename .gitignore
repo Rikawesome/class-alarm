@@ -4,3 +4,4 @@ server/pending/
 *.db
 *.db-*
 dist/
+.env

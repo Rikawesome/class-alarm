@@ -1,0 +1,36 @@
+.schedule-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 2rem;
+  background-color: var(--topbar-bg, #ffffff);
+  color: var(--topbar-color, #333333);
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.theme-toggle-btn {
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.theme-toggle-btn:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+:root.dark-theme {
+  --topbar-bg: #1e1e1e;
+  --topbar-color: #f0f0f0;
+}
+
+:root.dark-theme .theme-toggle-btn {
+  border-color: #555;
+  color: #f0f0f0;
+}
+
+:root.dark-theme .theme-toggle-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}

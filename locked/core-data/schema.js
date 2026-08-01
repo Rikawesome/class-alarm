@@ -1,6 +1,6 @@
 // LOCKED MODULE — evolution requests may never modify this file.
 // If a change here is ever truly needed, it requires a human developer
-// decision (see registry/contracts/core-data.json -> "locked_reason").
+// decision (see locked/core-data/module.json -> "locked_reason").
 
 export const COURSE_SCHEMA = {
   table: "courses",

@@ -95,9 +95,10 @@ export async function createApplicationServer({
 
   const server = createServer(async (request, response) => {
     const requestUrl = new URL(request.url, "http://127.0.0.1");
+    const pathname = requestUrl.pathname.replace(/\/+$/, "") || "/";
 
     try {
-      if (request.method === "GET" && requestUrl.pathname === "/api/health") {
+      if (request.method === "GET" && pathname === "/api/health") {
         sendJson(response, 200, {
           status: "ok",
           runtime: runtime.getSnapshot().status,
@@ -105,7 +106,7 @@ export async function createApplicationServer({
         return;
       }
 
-      if (request.method === "GET" && requestUrl.pathname === "/api/bootstrap") {
+      if (request.method === "GET" && pathname === "/api/bootstrap") {
         sendJson(response, 200, {
           courses: runtime.listCourses(),
           runtime: runtime.getSnapshot(),
@@ -113,7 +114,7 @@ export async function createApplicationServer({
         return;
       }
 
-      if (request.method === "GET" && requestUrl.pathname === "/api/events") {
+      if (request.method === "GET" && pathname === "/api/events") {
         response.writeHead(200, {
           "cache-control": "no-cache",
           connection: "keep-alive",
@@ -132,7 +133,7 @@ export async function createApplicationServer({
 
       if (
         request.method === "POST" &&
-        requestUrl.pathname === "/api/alarms/test"
+        pathname === "/api/alarms/test"
       ) {
         const body = await readJsonBody(request);
         const notification = runtime.triggerTestAlarm(body.courseId);
@@ -140,9 +141,40 @@ export async function createApplicationServer({
         return;
       }
 
+
       if (
         request.method === "POST" &&
-        requestUrl.pathname === "/api/courses"
+        pathname === "/api/courses/import"
+      ) {
+        const body = await readJsonBody(request);
+        const imported = runtime.importCourses(body.courses ?? []);
+        sendJson(response, 201, {
+          imported,
+          courses: runtime.listCourses(),
+          runtime: runtime.getSnapshot(),
+        });
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        pathname.match(/^\/api\/courses\/[^\/]+\/risk$/)
+      ) {
+        const parts = pathname.split("/");
+        const courseId = parts[3];
+        const body = await readJsonBody(request);
+        const course = runtime.toggleCourseRisk(courseId, Boolean(body.is_risky));
+        sendJson(response, 200, {
+          course,
+          courses: runtime.listCourses(),
+          runtime: runtime.getSnapshot(),
+        });
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        pathname === "/api/courses"
       ) {
         const body = await readJsonBody(request);
         const course = runtime.addCourse({
@@ -162,9 +194,9 @@ export async function createApplicationServer({
 
       if (
         request.method === "DELETE" &&
-        requestUrl.pathname.startsWith("/api/courses/")
+        pathname.startsWith("/api/courses/")
       ) {
-        const courseId = requestUrl.pathname.split("/")[3];
+        const courseId = pathname.split("/")[3];
         const course = runtime.removeCourse(courseId);
         sendJson(response, 200, {
           course,
@@ -175,7 +207,7 @@ export async function createApplicationServer({
       }
 
 
-      if (requestUrl.pathname.startsWith("/api/")) {
+      if (pathname.startsWith("/api/")) {
         sendJson(response, 404, { error: "API endpoint not found." });
         return;
       }
@@ -194,7 +226,7 @@ export async function createApplicationServer({
         return;
       }
 
-      serveProductionFile(requestUrl.pathname, response);
+      serveProductionFile(pathname, response);
     } catch (error) {
       const statusCode =
         error instanceof SyntaxError || error.message.includes("No course")

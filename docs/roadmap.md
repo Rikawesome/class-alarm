@@ -4,7 +4,8 @@ This is the session-independent plan for Project Darwin. Use it with:
 
 - `README.md` for architecture and run instructions.
 - `docs/learning-log.md` for lessons from completed work.
-- `registry/contracts/` for active module boundaries.
+- `registry/modules.json` and each registered module's colocated `module.json`
+  for active module boundaries.
 
 ## Product Thesis
 
@@ -25,7 +26,8 @@ Version 1 should demonstrate:
 
 1. Evolution requests never modify files under `locked/`.
 2. Modules under `locked/` never import modules under `evolvable/`.
-3. Evolvable modules never import protected schemas or database implementations.
+3. Evolvable modules never import modules under `locked/`; they use declared host
+   APIs or injected interfaces.
 4. Protected capabilities use narrow contracts or injection points.
 5. Evolvable behavior cannot suppress protected fallback behavior.
 6. The `app/` composition root is human-reviewed and controls how both sides connect.
@@ -67,32 +69,20 @@ npm run build
 
 ### Step 3 - Produce trustworthy change proposals
 
-Status: **Next**
+Status: **Complete**
 
-Goal:
-
-Convert a natural-language request into a structured, reviewable proposal without
-modifying the working application.
-
-Deliverables:
-
-- Replace free-form model output with a validated response schema.
-- Make the model identifier configurable.
-- Require explicit plans, file operations, contract effects, and test effects.
-- Reject malformed output and unsupported file operations.
-- Store every proposal under a unique request ID.
-- Record generation failures without changing the application.
-- Expose proposal status and risk path through an API.
-
-Acceptance criteria:
-
-- A UI request creates a valid proposal but does not change files.
-- Invalid model output becomes a recorded failure.
-- Existing alarms, persistence, tests, and build remain unchanged.
+- Replaced free-form output with validated Pydantic schemas using Google Gemini
+  (configurable with `DARWIN_MODEL`; current default `gemini-3.5-flash-lite`).
+- Made model identifier and API key configurable (`DARWIN_MODEL`, `GEMINI_API_KEY`).
+- Required explicit plans, file operations, contract effects, and test effects.
+- Added path traversal checks and explicit fast-path/full-path classification.
+- Stored every proposal under a unique request ID in `server/pending/` without modifying working application files.
+- Recorded generation failures in `logs/evolution-log.json`.
+- Exposed proposals and health check endpoints through the evolution control plane server.
 
 ### Step 4 - Build deterministic validation gates
 
-Status: **Pending**
+Status: **Next**
 
 Goal:
 
@@ -278,9 +268,10 @@ To reduce unnecessary command output and session usage:
 
 Use this prompt:
 
-> Read `docs/roadmap.md`, `docs/learning-log.md`, `README.md`, and all files under
-> `registry/contracts/`. Inspect the working tree, identify the first incomplete
-> roadmap step, and continue without changing completed architectural invariants.
+> Read `docs/roadmap.md`, `docs/learning-log.md`, `README.md`,
+> `registry/modules.json`, and every registered module's colocated `module.json`.
+> Inspect the working tree, identify the first incomplete roadmap step, and
+> continue without changing completed architectural invariants.
 
 Before new implementation, confirm:
 
