@@ -913,5 +913,145 @@ button:disabled {
 }
 
 .interactive-badge:hover {
-  opacity: 0.8;
+  opacity: 0.2s;
+}
+
+/* Dark Theme Overrides */
+.dark-theme {
+  color: #e2e8f0;
+  background: #0f172a;
+}
+
+.dark-theme body {
+  background: #0f172a;
+}
+
+.dark-theme .topbar {
+  background: #1e293b;
+  border-bottom: 1px solid #334155;
+}
+
+.dark-theme .topbar h1 {
+  color: #f8fafc;
+}
+
+.dark-theme .live-clock {
+  background: #334155;
+  color: #cbd5e1;
+}
+
+.dark-theme .secondary-button {
+  color: #38bdf8;
+  background: #1e293b;
+  border: 1px solid #334155;
+}
+
+.dark-theme .secondary-button:hover {
+  background: #334155;
+}
+
+.dark-theme .panel {
+  background: #1e293b;
+  border: 1px solid #334155;
+}
+
+.dark-theme .panel-heading {
+  border-bottom: 1px solid #334155;
+}
+
+.dark-theme .panel-heading h2 {
+  color: #f8fafc;
+}
+
+.dark-theme .course-table-header {
+  background: #1e293b;
+  color: #94a3b8;
+  border-bottom: 1px solid #334155;
+}
+
+.dark-theme .course-row {
+  border-bottom: 1px solid #334155;
+}
+
+.dark-theme .course-row.next {
+  background: #0f2d24;
+}
+
+.dark-theme .course-name-cell strong {
+  color: #f8fafc;
+}
+
+.dark-theme .course-name-cell small {
+  color: #94a3b8;
+}
+
+.dark-theme .course-day,
+.dark-theme .course-time {
+  color: #cbd5e1;
+}
+
+.dark-theme .standard-status {
+  color: #94a3b8;
+}
+
+.dark-theme .runtime-strip {
+  background: #1e293b;
+  border: 1px solid #334155;
+}
+
+.dark-theme .runtime-stat {
+  border-right: 1px solid #334155;
+}
+
+.dark-theme .runtime-stat strong {
+  color: #f8fafc;
+}
+
+.dark-theme .runtime-stat small {
+  color: #94a3b8;
+}
+
+.dark-theme .modal-card {
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+.dark-theme .modal-card h2 {
+  color: #f8fafc;
+}
+
+.dark-theme .add-course-form label {
+  color: #cbd5e1;
+}
+
+.dark-theme .add-course-form input,
+.dark-theme .add-course-form select {
+  background: #0f172a;
+  color: #f8fafc;
+  border: 1px solid #475569;
+}
+
+.dark-theme .chat-container {
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+.dark-theme .chat-msg--user {
+  background: #0f2d24;
+  color: #34d399;
+}
+
+.dark-theme .chat-msg--system {
+  background: #334155;
+  color: #cbd5e1;
+}
+
+.dark-theme .chat-input-row {
+  border-top: 1px solid #334155;
+}
+
+.dark-theme .chat-input-row input {
+  background: #0f172a;
+  color: #f8fafc;
+  border: 1px solid #475569;
 }

@@ -232,6 +232,36 @@ The transferable rule is to generate evolution requests as structured, reviewabl
 
 ---
 
+## 2026-08-06 - First live end-to-end evolution cycle confirmed; three engine bugs found and fixed
+
+**1. What this teaches the system**
+
+A validation pipeline that only runs in tests is not the same as one that runs against a real browser, a real build tool, and a real OS. Three bugs that were invisible in unit tests became immediately apparent the first time a live proposal attempted to apply against the actual codebase on Windows:
+
+1. **npm package imports flagged as boundary violations.** `find_imports()` + `resolve_import_path()` correctly flags non-relative imports that could reference locked paths — but it incorrectly treated bare package names like `react` and `lucide-react` the same way. Every JSX file in the codebase imports `react`, so every proposal touching any `.jsx` file failed dependency analysis.
+
+2. **`node --check` cannot parse `.jsx` files.** Node's syntax checker only understands plain JS/ESM. Passing a `.jsx` file to `node --check` throws `ERR_UNKNOWN_FILE_EXTENSION` regardless of the file's content. Since Vite's build step already catches JSX syntax errors, this check was redundant for `.jsx` and always wrong.
+
+3. **`npm` is not a binary on Windows.** With `shell=False`, `subprocess.run(["npm", ...])` raises `[WinError 2]` because `npm` on Windows is `npm.cmd`. Node is a real `.exe` and works fine; npm is a shell script wrapper and requires either `shell=True` or the `.cmd` extension.
+
+The rollback mechanism proved itself: on both failed proposals, files were written to disk, the validation pipeline detected the failure, and every modified file was restored before the error was returned. The app reloaded cleanly to its prior state both times.
+
+**2. How we implemented it**
+
+- **npm import fix**: `validate_proposal` now skips dependency flagging for bare package names (`/` not in import) and scoped packages (`@org/pkg` shape). Only slash-containing non-scoped imports (potential aliased repo paths) are still flagged.
+- **JSX syntax check fix**: `node --check` is now only invoked on files ending in `.js` and explicitly not `.jsx`. The Vite build in the same validation run already covers JSX syntax.
+- **Windows npm fix**: Added `npm_cmd()` helper that returns `"npm.cmd"` on Windows and `"npm"` elsewhere. Both `validate_proposal` and `apply_proposal` now use it.
+- **CORS**: Added `CORSMiddleware` to the Starlette app so the browser UI (localhost:4173) can reach the evolution server (localhost:8000) without preflight failures.
+- **Full UI composition**: `App.jsx` was wired up to compose `CourseList`, `AddCourseModal`, `ApprovalModal`, and `ChatInterface`. The app now fetches live data, handles SSE alarm events, and the chat FAB posts directly to `/evolve`.
+
+**3. How it applies elsewhere**
+
+Platform-specific subprocess behavior is a systemic risk in any cross-OS validation pipeline. The lesson: never assume CLI tool names are OS-agnostic when using `shell=False`. Always resolve executable names at runtime based on platform. The same issue would affect `python` vs `python3`, `pip` vs `pip3`, or any tool that ships as a shell wrapper on one OS and a binary on another.
+
+The rollback validation also demonstrates a broader principle: the correct mental model for transactional apply is not "write then check" but "check in a dry-run, then write only if clean." The current implementation writes first and rolls back on failure — which works, but leaves a window where the filesystem is in a mixed state. A future hardening step could move to a true atomic swap (write to temp, rename on success).
+
+---
+
 ## 2026-08-05 - Step 5: Transactional Patch Application with Automatic Rollback
 
 **1. What this teaches the system**

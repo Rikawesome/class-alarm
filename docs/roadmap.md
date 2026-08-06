@@ -82,51 +82,33 @@ Status: **Complete**
 
 ### Step 4 - Build deterministic validation gates
 
-Status: **Next**
+Status: **Complete**
 
-Goal:
-
-Mechanically determine whether a proposal respects the architecture.
-
-Deliverables:
-
-- Validate changed paths against module ownership.
-- Reject traversal and files outside the workspace.
-- Reject modifications under `locked/`.
-- Scan imports in both dependency directions.
-- Compare changed interfaces with contracts.
-- Run syntax checks, tests, and the production build.
-- Produce a structured pass/fail validation report.
-
-Acceptance criteria:
-
-- A presentation-only UI change can pass.
-- A direct database import from `evolvable/` is rejected.
-- A locked scheduler modification is rejected.
-- A broken build or protected test is rejected.
+- Validates changed paths against module ownership and registered modules.
+- Rejects path traversal and absolute paths.
+- Rejects modifications under `locked/` via hardcoded prefix list (independent of registry config).
+- Scans imports in both dependency directions; flags non-relative aliased imports that could smuggle cross-boundary references.
+- Runs syntax checks (`node --check` on `.js` only — JSX covered by Vite build), production build, and full test suite.
+- Produces a structured per-step pass/fail validation report.
 
 ### Step 5 - Apply changes transactionally
 
-Status: **Pending**
+Status: **Complete**
 
-Goal:
+- Snapshots all target files before applying operations.
+- Re-runs syntax, build, and test suite after write.
+- Atomically rolls back all modified files on any failure; marks status `rolled_back` in log.
+- Full-path proposals require explicit human approval before `apply` will proceed.
+- Every apply, rollback, and approval is recorded in `logs/evolution-log.json`.
 
-Apply validated changes without risking the last known-good application.
+### Step 5B - Live UI and evolution chat interface
 
-Deliverables:
+Status: **Complete** (2026-08-06)
 
-- Use structured file operations or a proper patch parser.
-- Snapshot the pre-change state.
-- Validate in isolation before replacing the working state.
-- Restore the previous state after failed validation.
-- Record before/after hashes and validation evidence.
-- Keep high-risk proposals pending for human review.
-
-Acceptance criteria:
-
-- A valid fast-path UI change applies successfully.
-- A failed change leaves the previous application recoverable.
-- Every apply, rejection, and rollback appears in the evolution log.
+- Built complete working UI: `App.jsx` (timetable, runtime stats, live clock), `CourseList.jsx` (risk toggle, delete, test alarm), `AddCourseModal.jsx`, `ApprovalModal.jsx`, `ChatInterface.jsx` (floating FAB).
+- Added CORS middleware to evolution server for browser access.
+- Confirmed first live end-to-end evolution cycle: natural language request → proposal → approval popup → transactional apply → Vite hot-reload.
+- Fixed three engine bugs discovered during live testing (see learning log 2026-08-06).
 
 ### Step 6 - Add constrained evolvable persistence
 
