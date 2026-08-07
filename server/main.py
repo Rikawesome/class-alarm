@@ -46,9 +46,16 @@ import subprocess
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import List, Literal, Optional, Union
 from typing import List, Literal, Optional
 
 from google import genai
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OpenAI = None  # type: ignore
+    OPENAI_AVAILABLE = False
 from google.genai import types
 from pydantic import BaseModel, Field
 from starlette.applications import Starlette
@@ -81,6 +88,119 @@ MAX_SAFE_CONTEXT_CHARS = 20_000
 # of the original file's length, treat it as a suspected wipe and force
 # manual review rather than silently allowing it.
 MIN_RETAINED_CONTENT_RATIO = 0.6
+
+# Maximum number of times the pipeline will automatically retry a proposal
+# after a fixable validation failure before escalating to the developer.
+MAX_RETRY_ATTEMPTS = 3
+
+# ---------------------------------------------------------------------------
+# Failure classification
+# ---------------------------------------------------------------------------
+# These categories determine whether the retry loop can attempt a fix, or
+# whether the problem requires human intervention.
+#
+#   FIXABLE    — syntax error, build error, or test failure all within
+#                evolvable/; the model can be shown its own output + the
+#                error and asked to correct it.
+#   UNFIXABLE  — the proposal touched a protected path, violated an
+#                architectural boundary, or broke governance tests. No
+#                amount of retrying will help; escalate immediately.
+#   PROMOTE    — the proposal needs a contract change; don't retry, reclassify
+#                as full-path and surface to the developer for approval.
+# ---------------------------------------------------------------------------
+
+FIXABLE_GATES = {"syntax_check", "production_build", "test_suite", "content_wipe_check"}
+UNFIXABLE_GATES = {"path_safety", "locked_protection", "dependency_analysis"}
+
+
+def classify_failure(steps: dict, errors: list) -> str:
+    """
+    Return 'FIXABLE', 'UNFIXABLE', or 'PROMOTE' for a validation result.
+    The classification drives whether evolve() retries or escalates.
+    """
+    for gate in UNFIXABLE_GATES:
+        if steps.get(gate) == "fail":
+            return "UNFIXABLE"
+
+    # A module_ownership failure usually means a contract change is needed.
+    if steps.get("module_ownership") == "fail":
+        return "PROMOTE"
+
+    # content_wipe is fixable — we tell Gemini to preserve more of the file.
+    # build / syntax / test failures are fixable if they're in evolvable/.
+    for gate in FIXABLE_GATES:
+        if steps.get(gate) == "fail":
+            return "FIXABLE"
+
+    # Fallback: if we can't categorise it, don't retry blindly.
+    return "UNFIXABLE"
+
+
+def build_retry_context(
+    intent: str,
+    failure_chain: list,
+    previous_operations: list,
+) -> str:
+    """
+    Build the evolution context for a retry attempt.
+
+    The critical addition over build_evolution_context() is a PREVIOUS ATTEMPT
+    FEEDBACK section that gives Gemini back exactly what it generated last time,
+    annotated with what went wrong. Without this the model has no memory of its
+    prior output and is likely to repeat the same mistake.
+    """
+    base_context = build_evolution_context(intent)
+
+    feedback_lines = [
+        "\n=== PREVIOUS ATTEMPT FEEDBACK (read this carefully before responding) ===",
+        f"Your proposal failed validation. This is attempt {len(failure_chain) + 1} of {MAX_RETRY_ATTEMPTS}.",
+        "",
+    ]
+
+    for i, record in enumerate(failure_chain, start=1):
+        feedback_lines.append(f"--- Attempt {i} failure ---")
+        feedback_lines.append(f"Gate that failed : {record['gate']}")
+        feedback_lines.append(f"Classification   : {record['classification']}")
+        feedback_lines.append(f"Error output     :\n{record['error']}")
+        if record.get("generated_files"):
+            feedback_lines.append("Files you generated in that attempt:")
+            for path, content in record["generated_files"].items():
+                feedback_lines.append(f"\n  [{path}]\n{content}")
+        feedback_lines.append("")
+
+    feedback_lines += [
+        "INSTRUCTIONS FOR THIS RETRY:",
+        "1. Read the error output above carefully — it shows exactly what was wrong.",
+        "2. The generated file content shown above is what you produced last time.",
+        "   Fix only the specific problem identified; do not rewrite unrelated parts.",
+        "3. The HARD RULES in the HOST APPLICATION CONTEXT section above still apply.",
+        "   Do not try to fix a problem by touching a protected path.",
+    ]
+
+    return base_context + "\n".join(feedback_lines)
+
+
+def write_escalation(request_id: str, intent: str, failure_chain: list, reason: str):
+    """
+    Append a structured escalation record to logs/escalations.json so the
+    developer has a single place to look when the retry loop gives up.
+    """
+    escalation_path = ROOT / "logs" / "escalations.json"
+    records = []
+    if escalation_path.exists():
+        try:
+            records = json.loads(escalation_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            records = []
+    records.append({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "request_id": request_id,
+        "original_request": intent,
+        "reason": reason,
+        "attempts": len(failure_chain),
+        "failure_chain": failure_chain,
+    })
+    escalation_path.write_text(json.dumps(records, indent=2), encoding="utf-8")
 
 
 def load_env_file():
@@ -141,6 +261,17 @@ class EvolutionRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 def get_model_name() -> str:
+    return os.getenv(DARWIN_MODEL, gemini-3.5-flash-lite)
+def get_gemini_client() -> Optional[genai.Client]:
+    api_key = os.getenv(GEMINI_API_KEY) or os.getenv(GOOGLE_API_KEY)
+    if not api_key:
+        return None
+    return genai.Client(api_key=api_key)
+
+# Helpers
+# ---------------------------------------------------------------------------
+
+def get_model_name() -> str:
     return os.getenv("DARWIN_MODEL", "gemini-3.5-flash-lite")
 
 
@@ -149,27 +280,6 @@ def get_gemini_client() -> Optional[genai.Client]:
     if not api_key:
         return None
     return genai.Client(api_key=api_key)
-
-
-def load_all_contracts() -> dict:
-    registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
-    contracts = {}
-    for module_id, entry in registry.get("modules", {}).items():
-        contract_path = (ROOT / entry["contract"]).resolve()
-        try:
-            contract_path.relative_to(ROOT)
-        except ValueError as err:
-            raise ValueError(f"Contract path for {module_id} escapes workspace: {entry['contract']}") from err
-        contract = json.loads(contract_path.read_text(encoding="utf-8"))
-        if contract.get("module") != module_id:
-            raise ValueError(f"Contract identity mismatch for {module_id}: {contract.get('module')!r}")
-        contracts[module_id] = contract
-    return contracts
-
-
-def load_registry_modules() -> dict:
-    registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
-    return registry.get("modules", {})
 
 
 def is_protected_path(path_str: str) -> bool:
@@ -713,14 +823,245 @@ async def get_proposal(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+def _generate_proposal(client, model_name: str, system_prompt: str, context: str) -> ProposalOutput:
+    """
+    Single Gemini call → validated ProposalOutput.
+    Separated so the retry loop can call it with different context each time.
+    """
+    response = client.models.generate_content(
+        model=model_name,
+        contents=context,
+        config=types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            response_mime_type="application/json",
+            response_schema=ProposalOutput,
+            temperature=0.1,
+        ),
+    )
+    proposal = ProposalOutput.model_validate(json.loads(response.text))
+    validate_file_paths(proposal)
+
+    unresolved = []
+    for op in proposal.operations:
+        if op.content:
+            for imp in find_imports(op.content):
+                if resolve_import_path(op.path, imp) is None:
+                    unresolved.append(imp)
+    proposal.unresolved_imports = unresolved
+    return proposal
+
+
+def _run_auto_evolve_loop(
+    client,
+    model_name: str,
+    system_prompt: str,
+    req_text: str,
+    session_id: str,
+    now_iso: str,
+) -> JSONResponse:
+    """
+    Self-healing retry loop — called by the /evolve endpoint when the caller
+    passes ``"auto_retry": true`` in the request body.
+
+    On each attempt the loop:
+      1. Generates a proposal (first attempt: base context; retries: base context
+         plus a PREVIOUS ATTEMPT FEEDBACK section containing the exact files
+         Gemini wrote last time and the exact error output).
+      2. Saves the proposal to server/pending/{id}.json.
+      3. Runs validate_proposal() against the saved file.
+      4. On pass → returns pending_review immediately.
+      5. On fail → classifies the failure and either:
+           UNFIXABLE  → writes to logs/escalations.json and returns 422.
+           PROMOTE    → returns 202 asking for human approval.
+           FIXABLE    → appends to failure_chain and loops.
+
+    After MAX_RETRY_ATTEMPTS all-FIXABLE failures the loop gives up, writes an
+    escalation record, and returns 422.
+
+    NOTE: validate_proposal() runs the full build + test suite on every attempt.
+    This keeps the loop strictly honest — it only declares success when the real
+    gates pass — but it means auto_retry requests are slow (30-60 s per attempt).
+    Use the standard /evolve → /proposals/{id}/validate flow when you want the
+    fast non-blocking experience.
+    """
+    failure_chain: list = []
+    last_proposal: Optional[ProposalOutput] = None
+
+    for attempt in range(1, MAX_RETRY_ATTEMPTS + 1):
+        attempt_id = str(uuid.uuid4())
+
+        if attempt == 1:
+            context = build_evolution_context(req_text)
+        else:
+            # Attach what Gemini generated last time to the last failure record
+            # so build_retry_context() can embed it in the new prompt.
+            if failure_chain and last_proposal:
+                failure_chain[-1]["generated_files"] = {
+                    op.path: op.content or ""
+                    for op in last_proposal.operations
+                    if op.action in ("create", "modify")
+                }
+            context = build_retry_context(req_text, failure_chain, [])
+
+        try:
+            proposal = _generate_proposal(client, model_name, system_prompt, context)
+        except Exception as gen_err:
+            error_msg = str(gen_err)
+            append_log({
+                "id": session_id, "timestamp": now_iso, "request": req_text,
+                "model": model_name, "path": "none", "status": "failed",
+                "error": error_msg, "attempt": attempt,
+            })
+            return JSONResponse(
+                {"error": f"Proposal generation failed: {error_msg}"},
+                status_code=500,
+            )
+
+        last_proposal = proposal
+        path_type = "fast" if is_fast_path(proposal) else "full"
+
+        attempt_record = {
+            "id": attempt_id,
+            "session_id": session_id,
+            "timestamp": now_iso,
+            "request": req_text,
+            "model": model_name,
+            "path": path_type,
+            "status": "pending_review",
+            "human_approved": False,
+            "plan": proposal.plan,
+            "files_touched": proposal.files_touched,
+            "attempt": attempt,
+            "failure_chain": failure_chain,
+        }
+        pending_file = PENDING_DIR / f"{attempt_id}.json"
+        pending_file.write_text(
+            json.dumps({"meta": attempt_record, "proposal": proposal.model_dump()}, indent=2),
+            encoding="utf-8",
+        )
+
+        validation = validate_proposal(attempt_id)
+
+        if validation.get("valid"):
+            append_log({**attempt_record, "status": "pending_review"})
+            return JSONResponse({
+                "id": attempt_id,
+                "session_id": session_id,
+                "path": path_type,
+                "status": "pending_review",
+                "plan": proposal.plan,
+                "files_touched": proposal.files_touched,
+                "attempts": attempt,
+                "failure_chain": failure_chain,
+            })
+
+        steps = validation.get("steps", {})
+        errors = validation.get("errors", [])
+        classification = classify_failure(steps, errors)
+
+        failing_gate = next(
+            (g for g in list(UNFIXABLE_GATES) + ["module_ownership"] + list(FIXABLE_GATES)
+             if steps.get(g) == "fail"),
+            "unknown",
+        )
+        failure_chain.append({
+            "attempt": attempt,
+            "attempt_id": attempt_id,
+            "gate": failing_gate,
+            "classification": classification,
+            "error": "\n".join(errors),
+            "steps": steps,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+        attempt_record["status"] = "failed_validation"
+        attempt_record["failure_chain"] = failure_chain
+        pending_file.write_text(
+            json.dumps({"meta": attempt_record, "proposal": proposal.model_dump()}, indent=2),
+            encoding="utf-8",
+        )
+        append_log({**attempt_record, "status": "failed_validation", "classification": classification})
+
+        if classification == "UNFIXABLE":
+            reason = (
+                f"Unfixable failure at gate '{failing_gate}' on attempt {attempt}: "
+                f"{errors[0] if errors else 'unknown'}"
+            )
+            write_escalation(session_id, req_text, failure_chain, reason)
+            return JSONResponse({
+                "id": attempt_id,
+                "session_id": session_id,
+                "status": "escalated",
+                "classification": "UNFIXABLE",
+                "reason": reason,
+                "failure_chain": failure_chain,
+                "developer_action_required": True,
+                "message": (
+                    "This proposal touched something beyond what the evolution engine "
+                    "can fix automatically. Details have been written to logs/escalations.json."
+                ),
+            }, status_code=422)
+
+        if classification == "PROMOTE":
+            return JSONResponse({
+                "id": attempt_id,
+                "session_id": session_id,
+                "status": "promoted",
+                "path": "full",
+                "classification": "PROMOTE",
+                "reason": f"Contract change required — promoted to full-path on attempt {attempt}",
+                "plan": proposal.plan,
+                "files_touched": proposal.files_touched,
+                "failure_chain": failure_chain,
+                "developer_action_required": True,
+                "message": "This request needs a contract change. Approve it as a full-path proposal.",
+            }, status_code=202)
+
+        # FIXABLE — loop with the failure injected into next prompt.
+
+    # Retry budget exhausted.
+    reason = (
+        f"Retry limit ({MAX_RETRY_ATTEMPTS}) exhausted. "
+        "All attempts had FIXABLE failures that could not be resolved."
+    )
+    write_escalation(session_id, req_text, failure_chain, reason)
+    append_log({
+        "id": session_id, "timestamp": now_iso, "request": req_text,
+        "model": model_name, "path": "none", "status": "escalated",
+        "attempts": MAX_RETRY_ATTEMPTS, "failure_chain": failure_chain,
+    })
+    return JSONResponse({
+        "session_id": session_id,
+        "status": "escalated",
+        "classification": "RETRY_EXHAUSTED",
+        "attempts": MAX_RETRY_ATTEMPTS,
+        "failure_chain": failure_chain,
+        "developer_action_required": True,
+        "message": (
+            f"The engine tried {MAX_RETRY_ATTEMPTS} times but could not produce a "
+            "passing proposal. See logs/escalations.json for the full failure chain."
+        ),
+    }, status_code=422)
+
+
 async def evolve(request: Request):
     """
-    FIX #9/#10: this is now the single, canonical proposal-generation
-    pipeline. The old two-stage plan->generate flow (which hardcoded
-    path="fast" and bypassed triage) has been removed rather than kept
-    alongside a diverging, inconsistent second path.
+    Evolution proposal endpoint — two modes depending on the request body:
+
+    Standard mode (default, ``"auto_retry"`` absent or false):
+      Generate one proposal, save it to pending/, and return immediately with
+      ``status: "pending_review"``. Validation and apply are separate steps
+      the caller drives explicitly. This is the fast path used by the chat UI.
+
+    Auto-retry mode (``"auto_retry": true``):
+      Run the self-healing loop: generate → validate → retry up to
+      MAX_RETRY_ATTEMPTS times, feeding each failure back as context for the
+      next attempt. Returns only when the proposal passes all gates, an
+      UNFIXABLE failure is hit, or retries are exhausted. Slower (one full
+      build+test run per attempt) but hands back a validated proposal or a
+      structured escalation without any further calls needed.
     """
-    request_id = str(uuid.uuid4())
+    session_id = str(uuid.uuid4())
     now_iso = datetime.now(timezone.utc).isoformat()
     model_name = get_model_name()
     client = get_gemini_client()
@@ -735,48 +1076,40 @@ async def evolve(request: Request):
 
     if not client:
         append_log({
-            "id": request_id, "timestamp": now_iso, "request": req_text, "model": model_name,
+            "id": session_id, "timestamp": now_iso, "request": req_text, "model": model_name,
             "path": "none", "status": "failed",
             "error": "GEMINI_API_KEY or GOOGLE_API_KEY not configured.",
         })
         return JSONResponse({"error": "Gemini API key is missing."}, status_code=500)
 
+    auto_retry = bool(body.get("auto_retry", False))
+
     try:
         contracts = load_all_contracts()
         system_prompt = build_system_prompt(contracts)
-        context = build_evolution_context(req_text)
+    except Exception as err:
+        return JSONResponse({"error": f"Failed to load contracts: {err}"}, status_code=500)
 
-        response = client.models.generate_content(
-            model=model_name,
-            contents=context,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                response_mime_type="application/json",
-                response_schema=ProposalOutput,
-                temperature=0.1,
-            ),
+    if auto_retry:
+        return _run_auto_evolve_loop(
+            client, model_name, system_prompt, req_text, session_id, now_iso
         )
-        proposal = ProposalOutput.model_validate(json.loads(response.text))
-        validate_file_paths(proposal)
 
-        # Resolve unresolved imports up front so is_fast_path() sees them.
-        unresolved = []
-        for op in proposal.operations:
-            if op.content:
-                for imp in find_imports(op.content):
-                    if resolve_import_path(op.path, imp) is None:
-                        unresolved.append(imp)
-        proposal.unresolved_imports = unresolved
+    # --- Standard single-shot path (original behaviour) ---
+    try:
+        context = build_evolution_context(req_text)
+        proposal = _generate_proposal(client, model_name, system_prompt, context)
 
         fast = is_fast_path(proposal)
         path_type = "fast" if fast else "full"
 
         proposal_record = {
-            "id": request_id, "timestamp": now_iso, "request": req_text, "model": model_name,
+            "id": session_id, "timestamp": now_iso, "request": req_text, "model": model_name,
             "path": path_type, "status": "pending_review", "human_approved": False,
             "plan": proposal.plan, "files_touched": proposal.files_touched,
+            "failure_chain": [],
         }
-        pending_file = PENDING_DIR / f"{request_id}.json"
+        pending_file = PENDING_DIR / f"{session_id}.json"
         pending_file.write_text(
             json.dumps({"meta": proposal_record, "proposal": proposal.model_dump()}, indent=2),
             encoding="utf-8",
@@ -784,14 +1117,14 @@ async def evolve(request: Request):
         append_log(proposal_record)
 
         return JSONResponse({
-            "id": request_id, "path": path_type, "status": "pending_review",
+            "id": session_id, "path": path_type, "status": "pending_review",
             "plan": proposal.plan, "files_touched": proposal.files_touched,
         })
 
     except Exception as err:
         error_msg = str(err)
         append_log({
-            "id": request_id, "timestamp": now_iso, "request": req_text, "model": model_name,
+            "id": session_id, "timestamp": now_iso, "request": req_text, "model": model_name,
             "path": "none", "status": "failed", "error": error_msg,
         })
         status_code = 400 if isinstance(err, (ValueError, json.JSONDecodeError)) else 500

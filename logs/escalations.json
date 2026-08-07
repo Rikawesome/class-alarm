@@ -1,0 +1,71 @@
+[
+  {
+    "timestamp": "2026-08-06T22:50:09.298927+00:00",
+    "request_id": "1c48c6df-ffe1-43f0-83a8-a9f30f7c08c8",
+    "original_request": "Add a dark mode toggle to the schedule topbar",
+    "reason": "Retry limit (3) exhausted. All attempts had FIXABLE failures that could not be resolved.",
+    "attempts": 3,
+    "failure_chain": [
+      {
+        "attempt": 1,
+        "attempt_id": "8cff6c22-fd8c-4105-8637-6ac3d10a989a",
+        "gate": "content_wipe_check",
+        "classification": "FIXABLE",
+        "error": "Suspected content wipe in evolvable/ui/App.jsx: new content is 0% the length of the original (26 vs 7971 chars). Flagged for manual review instead of auto-applying.",
+        "steps": {
+          "path_safety": "pass",
+          "module_ownership": "pass",
+          "locked_protection": "pass",
+          "dependency_analysis": "pass",
+          "content_wipe_check": "fail",
+          "syntax_check": "pending",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-06T22:50:09.145286+00:00",
+        "generated_files": {
+          "evolvable/ui/App.jsx": "// Updated App.jsx content"
+        }
+      },
+      {
+        "attempt": 2,
+        "attempt_id": "c8d42185-c4c2-43c2-b00e-074c5c98c4d8",
+        "gate": "content_wipe_check",
+        "classification": "FIXABLE",
+        "error": "Suspected content wipe in evolvable/ui/App.jsx: new content is 0% the length of the original (26 vs 7971 chars). Flagged for manual review instead of auto-applying.",
+        "steps": {
+          "path_safety": "pass",
+          "module_ownership": "pass",
+          "locked_protection": "pass",
+          "dependency_analysis": "pass",
+          "content_wipe_check": "fail",
+          "syntax_check": "pending",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-06T22:50:09.183943+00:00",
+        "generated_files": {
+          "evolvable/ui/App.jsx": "// Updated App.jsx content"
+        }
+      },
+      {
+        "attempt": 3,
+        "attempt_id": "8425569c-edf4-4d5f-9781-b8d117089a1c",
+        "gate": "content_wipe_check",
+        "classification": "FIXABLE",
+        "error": "Suspected content wipe in evolvable/ui/App.jsx: new content is 0% the length of the original (26 vs 7971 chars). Flagged for manual review instead of auto-applying.",
+        "steps": {
+          "path_safety": "pass",
+          "module_ownership": "pass",
+          "locked_protection": "pass",
+          "dependency_analysis": "pass",
+          "content_wipe_check": "fail",
+          "syntax_check": "pending",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-06T22:50:09.278295+00:00"
+      }
+    ]
+  }
+]

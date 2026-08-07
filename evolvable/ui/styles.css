@@ -501,17 +501,25 @@ button:disabled {
 }
 
 .risk-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 7px;
-  color: #8b4b20;
-  background: #fff0db;
-  border-radius: 5px;
+  color: #c2410c;
+  background: #ffedd5;
+  border: 1px solid #fed7aa;
+}
+
+.risk-badge:hover {
+  background: #ffdbb5;
+  border-color: #fdba74;
 }
 
 .standard-status {
-  color: #69736d;
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+}
+
+.standard-status:hover {
+  background: #e2e8f0;
+  border-color: #94a3b8;
 }
 
 .course-test-button {
@@ -900,20 +908,26 @@ button:disabled {
 }
 
 .interactive-badge {
-  background: none;
-  border: none;
+  border: 1px solid transparent;
   font: inherit;
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
+  padding: 6px 12px;
+  border-radius: 20px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  transition: opacity 0.2s;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.2s ease;
 }
 
 .interactive-badge:hover {
-  opacity: 0.2s;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.interactive-badge:active {
+  transform: translateY(0);
 }
 
 /* Dark Theme Overrides */
@@ -991,7 +1005,25 @@ button:disabled {
 }
 
 .dark-theme .standard-status {
-  color: #94a3b8;
+  color: #cbd5e1;
+  background: #334155;
+  border: 1px solid #475569;
+}
+
+.dark-theme .standard-status:hover {
+  background: #475569;
+  border-color: #64748b;
+}
+
+.dark-theme .risk-badge {
+  color: #fdba74;
+  background: rgba(124, 45, 18, 0.3);
+  border: 1px solid rgba(249, 115, 22, 0.4);
+}
+
+.dark-theme .risk-badge:hover {
+  background: rgba(124, 45, 18, 0.5);
+  border-color: rgba(249, 115, 22, 0.6);
 }
 
 .dark-theme .runtime-strip {
