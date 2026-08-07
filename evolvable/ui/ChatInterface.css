@@ -136,3 +136,9 @@
 }
 .chat-input-row button:hover:not(:disabled) { background: #205f4a; }
 .chat-input-row button:disabled { opacity: .55; cursor: not-allowed; }
+
+.chat-msg--status {
+  align-self: flex-start;
+  background: #e6f7ff;
+  color: #1e6ba8;
+}
