@@ -7,6 +7,12 @@
       "role": "protected-core",
       "evolution_policy": "locked"
     },
+    "personal-data": {
+      "path": "locked/personal-data",
+      "contract": "locked/personal-data/module.json",
+      "role": "protected-capability-host",
+      "evolution_policy": "locked"
+    },
     "alarm-engine": {
       "path": "locked/alarm-engine",
       "contract": "locked/alarm-engine/module.json",
@@ -17,13 +23,33 @@
       "path": "evolvable/features/risk-flag",
       "contract": "evolvable/features/risk-flag/module.json",
       "role": "feature",
-      "evolution_policy": "evolvable"
+      "evolution_policy": "evolvable",
+      "storage_namespace": "risk-flag",
+      "storage_schema": {
+        "version": 1,
+        "record": {
+          "type": "object",
+          "required": ["isRisky"],
+          "additionalProperties": false,
+          "properties": {"isRisky": {"type": "boolean"}}
+        }
+      }
     },
     "ui": {
       "path": "evolvable/ui",
       "contract": "evolvable/ui/module.json",
       "role": "presentation",
-      "evolution_policy": "evolvable"
+      "evolution_policy": "evolvable",
+      "storage_namespace": "ui",
+      "storage_schema": {
+        "version": 1,
+        "record": {
+          "type": "object",
+          "required": [],
+          "additionalProperties": true,
+          "properties": {}
+        }
+      }
     },
     "app-runtime": {
       "path": "app",

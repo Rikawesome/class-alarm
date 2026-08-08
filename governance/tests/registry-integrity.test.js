@@ -29,6 +29,19 @@ test("registry entries resolve to one canonical local contract", async () => {
     assert.equal(contract.evolution_policy, entry.evolution_policy);
     assert.equal(contract.file_policies["module.json"], "human-review");
 
+    if (entry.evolution_policy === "evolvable") {
+      assert.equal(typeof entry.storage_namespace, "string");
+      assert.equal(contract.storage_namespace, entry.storage_namespace);
+      assert.deepEqual(contract.storage_schema, entry.storage_schema);
+      assert.equal(Number.isInteger(entry.storage_schema?.version), true);
+      assert.match(entry.storage_namespace, /^[a-z0-9][a-z0-9._-]*$/);
+    } else {
+      assert.equal(entry.storage_namespace, undefined);
+      assert.equal(contract.storage_namespace, undefined);
+      assert.equal(entry.storage_schema, undefined);
+      assert.equal(contract.storage_schema, undefined);
+    }
+
     for (const dependency of contract.depends_on ?? []) {
       assert.ok(
         registry.modules[dependency],

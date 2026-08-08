@@ -2,6 +2,16 @@
   "module": "ui",
   "role": "presentation",
   "evolution_policy": "evolvable",
+  "storage_namespace": "ui",
+  "storage_schema": {
+    "version": 1,
+    "record": {
+      "type": "object",
+      "required": [],
+      "additionalProperties": true,
+      "properties": {}
+    }
+  },
   "owns": [
     "evolvable/ui/**"
   ],

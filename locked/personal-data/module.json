@@ -1,0 +1,34 @@
+{
+  "module": "personal-data",
+  "role": "protected-capability-host",
+  "evolution_policy": "locked",
+  "locked_reason": "Owns feature-private persistence and controls namespace-bound capabilities without exposing database access.",
+  "owns": [
+    "locked/personal-data/**",
+    "data/personal-data.db"
+  ],
+  "exposes": {
+    "createPersonalDataCapabilityForModule": "(moduleId: string) -> PersonalDataCapability"
+  },
+  "depends_on": [],
+  "invariants": [
+    "never imports evolvable code",
+    "never exposes a database handle, SQL interface, ORM, or filesystem path",
+    "every capability is bound to one namespace registered for an evolvable module",
+    "stored values are JSON-compatible and schema-versioned",
+    "capabilities can be created only for registry-registered evolvable modules",
+    "each module's registered schema version and record shape are enforced on read and write"
+  ],
+  "file_policies": {
+    "module.json": "human-review",
+    "*.js": "locked",
+    "tests/**": "locked"
+  },
+  "test_policy": {
+    "owner": "personal-data",
+    "existing_tests": "locked",
+    "new_tests": "human-review"
+  },
+  "version": "1.0.0",
+  "last_updated": "2026-08-08"
+}

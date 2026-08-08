@@ -2,11 +2,23 @@
   "module": "risk-flag",
   "role": "feature",
   "evolution_policy": "evolvable",
+  "storage_namespace": "risk-flag",
+  "storage_schema": {
+    "version": 1,
+    "record": {
+      "type": "object",
+      "required": ["isRisky"],
+      "additionalProperties": false,
+      "properties": {"isRisky": {"type": "boolean"}}
+    }
+  },
   "owns": [
     "evolvable/features/risk-flag/**"
   ],
   "exposes": {
     "isRisky": "(courseId: string) -> boolean",
+    "setRisky": "(courseId: string, risky: boolean) -> void",
+    "createRiskFlag": "({ storage: PersonalDataCapability }) -> RiskFlag",
     "getAlarmDisplayData": "(course: Course) -> { title: string, body: string }"
   },
   "implements": {
@@ -15,6 +27,10 @@
   "depends_on": [],
   "consumed_by": [
     "app-runtime"
+  ],
+  "invariants": [
+    "never imports protected database or scheduling implementations",
+    "receives personal storage only through the host-injected capability"
   ],
   "evolvable_surface": [
     "risk definition logic",

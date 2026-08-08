@@ -113,7 +113,7 @@ Status: **Complete** (2026-08-06)
 
 ### Step 6 - Add constrained evolvable persistence
 
-Status: **Pending**
+Status: **In progress — 6.2 complete; 6.3 next**
 
 Goal:
 
@@ -129,7 +129,43 @@ Deliverables:
 - Version evolvable storage schemas.
 - Add backup and rollback behavior for feature-owned data.
 
+Sub-steps:
+
+- **6.1 — Design the storage contract: Complete.** Defined the locked host
+  boundary, namespace-bound capability API, JSON data rules, schema/version
+  policy, and recovery invariants in `docs/storage-contract.md`.
+- **6.2 — Implement the locked storage host: Complete.** Added the locked
+  `personal-data` module with a separate SQLite store, a namespace-bound
+  capability, JSON-value validation, explicit schema-version checks, and
+  persistence tests.
+- **6.3 — Module namespaces: Complete.** Added explicit `storage_namespace`
+  entries to evolvable module contracts and the canonical registry. The locked
+  host now creates capabilities only from registered evolvable module IDs and
+  tests prove separate feature namespaces cannot cross-read or cross-delete.
+- **6.4 — Controlled API: Complete.** The composition root injects the
+  registry-bound personal-data capability into `risk-flag`; the feature uses
+  only `get`, `set`, and `delete`, never a database or filesystem primitive.
+- **6.5 — Schema/version handling: Complete.** Registered namespace schemas and
+  versions are enforced on every personal-data read and write; mismatches fail
+  explicitly.
+- **6.6 — Recovery / rollback: Complete.** Personal-data writes and deletes
+  retain namespace-scoped snapshots; trusted recovery validates the snapshot
+  before restoring it, and malformed backups are refused without changing live
+  data.
+- **6.7 — Tests: Complete.** The final invariant-focused suite covers
+  persistence, namespace isolation, capability shape, schema enforcement,
+  malformed-backup recovery, protected-core preservation, and the existing
+  Step 1–5 behavior.
+
 Acceptance criteria:
+
+6.4 status: **Complete**. The composition root injects the registry-bound
+personal-data capability into `risk-flag`; the feature uses only `get`, `set`,
+and `delete`, never a database or filesystem primitive.
+
+6.5 status: **Complete**. Registered namespace schemas and versions are enforced
+on every personal-data read and write; mismatches fail explicitly. 6.6 and 6.7
+status: **Complete**. Step 6 is complete; Step 7 is next.
 
 - An evolvable feature persists its records across restarts.
 - It cannot modify or query the protected course database directly.

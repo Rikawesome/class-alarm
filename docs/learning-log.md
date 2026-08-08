@@ -334,3 +334,187 @@ retain isolation around untrusted changes. The transferable rule is to optimize
 the validation boundary rather than weakening it. Test suites must also evolve
 with route and contract changes; otherwise stale tests create noise instead of
 detecting regressions.
+
+---
+
+## 2026-08-08 - Define the constrained personal-storage contract
+
+**1. What this teaches the system**
+
+Persistence for evolvable features must be exposed as a narrow, namespace-bound
+capability rather than as a general database service. The composition root must
+decide which feature receives which capability, while the protected host owns
+storage, validation, versioning, and recovery.
+
+**2. How we implemented it**
+
+Step 6.1 was completed as a design-only change in
+`docs/storage-contract.md`. The contract defines `get`, `set`, `delete`, and
+`list` operations over JSON-compatible values, forbids namespace selection by
+feature code, separates personal storage from `locked/core-data/`, and requires
+explicit schema versions, migrations, atomic writes, and namespace-scoped
+recovery. No runtime storage implementation was added.
+
+**3. How it applies elsewhere**
+
+The same capability model applies to plugins, browser extensions, workflow
+automation, and multi-tenant services: give untrusted code the smallest
+resource-specific interface needed for its task, and keep ownership and
+recovery in a trusted host.
+
+---
+
+## 2026-08-08 - Bind personal storage to registered module namespaces
+
+**1. What this teaches the system**
+
+A namespace string is not an authorization boundary if feature code can choose
+it freely. Namespace ownership must come from the canonical module registry and
+be checked by the trusted storage host.
+
+**2. How we implemented it**
+
+Evolvable contracts and registry entries now declare `storage_namespace`. The
+personal-data host accepts a registered module ID, rejects unknown or locked
+modules, resolves the namespace itself, and exposes no public raw-namespace
+factory. Governance tests require registry and colocated-contract agreement;
+personal-data tests prove separate registered modules cannot access each other's
+records.
+
+**3. How it applies elsewhere**
+
+The same pattern applies to plugin permissions, tenant data stores, and scoped
+API tokens: resolve authority from trusted registration metadata and issue
+handles that cannot be widened by untrusted callers.
+
+---
+
+## 2026-08-08 - Implement the locked personal-storage host
+
+**1. What this teaches the system**
+
+The persistence boundary becomes enforceable only when the trusted host owns
+the database and gives features a namespace-bound capability instead of a raw
+storage primitive.
+
+**2. How we implemented it**
+
+Step 6.2 added the locked `personal-data` module and registered its colocated
+contract. It owns a separate `data/personal-data.db`, exposes only `get`, `set`,
+`delete`, and `list` through a frozen capability, validates identifiers and
+JSON-compatible values, and rejects schema-version mismatches. Tests verify
+restart persistence, namespace separation, invalid-value rejection, and safe
+database teardown. The application composition root does not wire this into a
+feature yet; controlled feature access is reserved for Step 6.4.
+
+**3. How it applies elsewhere**
+
+Plugin systems and multi-tenant services should issue resource-scoped handles
+from a trusted host. A handle that cannot name another tenant, open a database,
+or access a filesystem path makes the intended authority boundary concrete.
+
+---
+
+## 2026-08-08 - Add namespace-scoped personal-data recovery
+
+**1. What this teaches the system**
+
+Recovery must be owned by the trusted host and scoped to one feature namespace.
+An extension must not be able to restore arbitrary data, and a malformed backup
+must fail before it can damage valid state.
+
+**2. How we implemented it**
+
+Step 6.6 added namespace snapshots to the locked personal-data store. Every
+mutating write or delete captures the prior namespace state inside the same
+`BEGIN IMMEDIATE` transaction. Trusted recovery resolves a registered module ID,
+validates the backup's JSON and schema version, and restores only that namespace.
+Tests prove recovery leaves another namespace unchanged and refuses malformed
+backups without changing live records.
+
+**3. How it applies elsewhere**
+
+Tenant stores, plugin state, and user settings should use scoped snapshots and
+validate recovery inputs before replacement. The same rule protects unrelated
+tenants and core data during rollback.
+
+---
+
+## 2026-08-08 - Prove constrained persistence invariants end to end
+
+**1. What this teaches the system**
+
+Persistence is only constrained when its guarantees are tested together with the
+existing protected application. Feature persistence, authority boundaries,
+schema checks, recovery, and the original timetable behavior must be verified
+as one system.
+
+**2. How we implemented it**
+
+Step 6.7 added explicit tests for:
+
+- personal data surviving a fresh process;
+- bidirectional `risk-flag` and `ui` namespace isolation;
+- operation-only capabilities with no database or filesystem primitives;
+- invalid fields, types, and stored versions being rejected;
+- malformed recovery snapshots not overwriting valid live data;
+- personal storage leaving the protected course database unchanged; and
+- the full previous application, scheduler, persistence, boundary, governance,
+  and build behavior remaining intact.
+
+The serialized Node suite passes 25/25, the Python evolution-server suite passes
+10/10, and the production build passes.
+
+**3. How it applies elsewhere**
+
+Security-sensitive feature work should finish with an invariant matrix that
+proves both the new capability and the old protected behavior. This catches
+boundary regressions that feature-local tests alone cannot see.
+
+---
+
+## 2026-08-08 - Inject the controlled storage API through the composition root
+
+**1. What this teaches the system**
+
+Declaring a capability is not enough; the host must be the only place that
+creates and assigns it. Evolvable code should receive a narrow handle and use
+that handle without importing the protected storage implementation.
+
+**2. How we implemented it**
+
+Step 6.4 wires the registry-bound `risk-flag` capability through `app/runtime.js`
+into a feature factory. Risk state now uses only namespace-bound `get`, `set`,
+and `delete` operations, and survives creation of a fresh runtime. The feature
+has no import path to `locked/personal-data/`, its database, or the filesystem.
+Application, governance, and personal-storage tests pass 11/11 together.
+
+**3. How it applies elsewhere**
+
+Composition roots in plugin and automation systems should construct scoped
+capabilities at startup and pass them explicitly. This makes authority visible,
+reviewable, and difficult for an extension to expand accidentally.
+
+---
+
+## 2026-08-08 - Enforce registered personal-storage schemas
+
+**1. What this teaches the system**
+
+A stored version number without a trusted record schema does not protect data
+integrity. Schema authority must come from registered module metadata, and
+callers must not select a version or bypass shape validation.
+
+**2. How we implemented it**
+
+Step 6.5 added `storage_schema` metadata for evolvable modules and required the
+registry and colocated contracts to agree. The locked host validates required
+fields, types, and unknown-field policy on both writes and reads. It rejects
+schema-version mismatches explicitly, with no silent reset or migration. The
+application, governance, and personal-storage suites pass 12/12 together.
+
+**3. How it applies elsewhere**
+
+Configuration stores, plugin state, and API payloads should validate against a
+versioned trusted schema at every boundary. Explicit refusal is safer than
+silently interpreting data under a newer or incompatible shape.

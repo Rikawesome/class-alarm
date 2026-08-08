@@ -36,6 +36,7 @@ that log with:
 locked/                  # Never touched by evolution requests, ever
   core-data/             # Course schema and validated core accessors (CRUD)
   alarm-engine/          # The scheduling/firing logic itself
+  personal-data/         # Feature-private persistence host and capabilities
   config/                # Env vars, API keys, build config
 
 app/                     # Human-reviewed composition root and HTTP host

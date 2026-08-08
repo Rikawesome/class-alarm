@@ -4,10 +4,11 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 
-import { getAlarmDisplayData, isRisky, setRisky } from "../evolvable/features/risk-flag/index.js";
+import { createRiskFlag } from "../evolvable/features/risk-flag/index.js";
 import { getSafeAlarmDisplayData } from "../locked/alarm-engine/alarm-display.js";
 import { scheduleCourseAlarms } from "../locked/alarm-engine/scheduler.js";
 import { getAllCourses, createCourse, deleteCourse } from "../locked/core-data/access.js";
+import { createPersonalDataCapabilityForModule } from "../locked/personal-data/access.js";
 
 const MAX_NOTIFICATION_HISTORY = 20;
 
@@ -21,13 +22,17 @@ function toPublicScheduledAlarm(alarm) {
 
 export function createClassAlarmRuntime({
   courseReader = { getAllCourses },
-  alarmDisplayFormatter = getAlarmDisplayData,
-  riskEvaluator = isRisky,
+  alarmDisplayFormatter,
+  riskEvaluator,
   now = () => new Date(),
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   scheduleDailyRefresh = true,
+  riskStorage = createPersonalDataCapabilityForModule("risk-flag"),
 } = {}) {
+  const riskFlag = createRiskFlag({ storage: riskStorage });
+  const displayFormatter = alarmDisplayFormatter ?? riskFlag.getAlarmDisplayData;
+  const evaluateRisk = riskEvaluator ?? riskFlag.isRisky;
   const events = new EventEmitter();
   let scheduledAlarms = [];
   let recentNotifications = [];
@@ -37,7 +42,7 @@ export function createClassAlarmRuntime({
   function listCourses() {
     return courseReader.getAllCourses().map((course) => ({
       ...course,
-      is_risky: Boolean(riskEvaluator(course.id)),
+      is_risky: Boolean(evaluateRisk(course.id)),
     }));
   }
 
@@ -54,7 +59,7 @@ export function createClassAlarmRuntime({
   }
 
   function toggleCourseRisk(courseId, risky) {
-    setRisky(courseId, risky);
+    riskFlag.setRisky(courseId, risky);
     reschedule();
     return listCourses().find((c) => c.id === courseId);
   }
@@ -123,7 +128,7 @@ export function createClassAlarmRuntime({
       (displayData, course) => {
         recordNotification(displayData, course, "scheduled");
       },
-      alarmDisplayFormatter,
+      displayFormatter,
       {
         now,
         setTimer,
@@ -185,7 +190,7 @@ export function createClassAlarmRuntime({
 
     const displayData = getSafeAlarmDisplayData(
       course,
-      alarmDisplayFormatter,
+      displayFormatter,
     );
 
     return recordNotification(displayData, course, "test");

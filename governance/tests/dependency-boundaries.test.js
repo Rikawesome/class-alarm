@@ -5,6 +5,7 @@ import test from "node:test";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const LOCKED_ROOT = join(ROOT, "locked");
+const EVOLVABLE_ROOT = join(ROOT, "evolvable");
 
 async function collectJavaScriptFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -30,6 +31,24 @@ test("locked modules do not import evolvable code", async () => {
     const source = await readFile(filePath, "utf8");
 
     if (/(?:from\s+|import\s*\()["'][^"']*evolvable\//.test(source)) {
+      violations.push(filePath);
+    }
+  }
+
+  assert.deepEqual(violations, []);
+});
+
+test("evolvable modules do not import storage or filesystem primitives", async () => {
+  const violations = [];
+
+  for (const filePath of await collectJavaScriptFiles(EVOLVABLE_ROOT)) {
+    const source = await readFile(filePath, "utf8");
+    if (
+      source.includes("locked/personal-data") ||
+      source.includes("node:sqlite") ||
+      source.includes("node:fs") ||
+      source.includes("node:fs/promises")
+    ) {
       violations.push(filePath);
     }
   }

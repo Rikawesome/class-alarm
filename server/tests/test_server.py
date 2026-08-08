@@ -24,6 +24,7 @@ class TestEvolutionServer(unittest.TestCase):
             set(contracts),
             {
                 "alarm-engine", "app-runtime", "core-data", "evolution-server",
+                "personal-data",
                 "governance", "risk-flag", "ui", "web-shell",
             },
         )

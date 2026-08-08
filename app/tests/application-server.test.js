@@ -111,3 +111,21 @@ test("allows creating, toggling risk, and deleting courses through API", async (
   assert.equal(deleteRes.status, 200);
   assert.equal(deleteData.course.id, courseId);
 });
+
+test("risk state persists through the injected personal-data capability", async () => {
+  const selectedCourse = runtime.listCourses().find((course) => course.id !== "course-systems-design");
+  assert.equal(selectedCourse.is_risky, false);
+
+  const toggled = runtime.toggleCourseRisk(selectedCourse.id, true);
+  assert.equal(toggled.is_risky, true);
+
+  const { createClassAlarmRuntime } = await import("../runtime.js");
+  const restartedRuntime = createClassAlarmRuntime({ scheduleDailyRefresh: false });
+  assert.equal(
+    restartedRuntime.listCourses().find((course) => course.id === selectedCourse.id).is_risky,
+    true,
+  );
+
+  restartedRuntime.toggleCourseRisk(selectedCourse.id, false);
+  restartedRuntime.stop();
+});
