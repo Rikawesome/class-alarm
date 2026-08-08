@@ -19,7 +19,8 @@ npm run build
 ```
 
 The Python evolution backend is not required to run the baseline application. It
-will be connected when the patch-generation pipeline is implemented.
+provides the separate proposal, validation, approval, and application control
+plane when its dependencies and API key are configured.
 
 Architectural lessons from each implementation step are recorded in
 [`docs/learning-log.md`](docs/learning-log.md). Every meaningful change should update
@@ -75,13 +76,16 @@ logs/
 
 ## Fast path vs full path, MVP-sized
 
-A request is fast-path eligible only if the generated diff:
+A request is fast-path eligible only if the generated proposal:
 - touches only files under `evolvable/ui/`
+- changes only stylesheets (`.css`, `.scss`, `.sass`, or `.less`)
 - modifies no colocated `module.json` contract
-- contains no imports from `locked/`
+- contains no unresolved or protected-boundary imports
 
-Anything else is full-path. Both paths currently create reviewable artifacts under
-`server/pending/`. Transactional application is handled by Step 5.
+Anything else is full-path. Both paths create reviewable artifacts under
+`server/pending/`. Fast-path proposals use structural and governance checks;
+code-changing proposals use isolated syntax, build, and test validation.
+Transactional application and rollback are implemented in the evolution server.
 
 ## The Upgraded Evolution Pipeline (Engineered Workflow)
 
@@ -93,5 +97,5 @@ The complete evolution pipeline follows these stages:
 3. **Step 3A (Evolution Plan)**: The AI acts as an Evolution Planner, drafting a structured multi-file change strategy.
 4. **Plan Validation**: Inspects the plan against architectural invariants and module boundaries.
 5. **Step 3B (Code Proposal)**: Generates precise operations (`create`, `modify`, `delete`) matching the validated plan.
-6. **Code Validation (Step 4)**: Deterministic validation gates check path safety, ownership, dependency imports, syntax (`node --check`), test suite (`node --test`), and production build (`npm run build`).
+6. **Code Validation (Step 4)**: Deterministic validation gates check path safety, ownership, dependency imports, and content integrity. Code-changing proposals additionally run isolated syntax (`node --check`), test suite (`node --test`), and production build (`npm run build`) checks.
 7. **Transactional Apply (Step 5)**: Atomically applies the validated change with automatic rollback on post-application failure.

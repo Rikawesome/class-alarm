@@ -72,7 +72,7 @@ npm run build
 Status: **Complete**
 
 - Replaced free-form output with validated Pydantic schemas using Google Gemini
-  (configurable with `DARWIN_MODEL`; current default `gemini-3.5-flash-lite`).
+  (configurable with `DARWIN_MODEL`; current default `gemini-2.5-flash`).
 - Made model identifier and API key configurable (`DARWIN_MODEL`, `GEMINI_API_KEY`).
 - Required explicit plans, file operations, contract effects, and test effects.
 - Added path traversal checks and explicit fast-path/full-path classification.
@@ -88,15 +88,16 @@ Status: **Complete**
 - Rejects path traversal and absolute paths.
 - Rejects modifications under `locked/` via hardcoded prefix list (independent of registry config).
 - Scans imports in both dependency directions; flags non-relative aliased imports that could smuggle cross-boundary references.
-- Runs syntax checks (`node --check` on `.js` only — JSX covered by Vite build), production build, and full test suite.
+- Runs syntax checks (`node --check` on `.js` only — JSX covered by Vite build), production build, and full test suite for code-changing proposals. Stylesheet-only fast-path proposals complete after structural and governance checks.
 - Produces a structured per-step pass/fail validation report.
+- Reuses an isolated validation workspace across code-changing proposals and synchronizes only changed source files, avoiding repeated full repository copies.
 
 ### Step 5 - Apply changes transactionally
 
 Status: **Complete**
 
 - Snapshots all target files before applying operations.
-- Re-runs syntax, build, and test suite after write.
+- Re-runs applicable syntax, build, and test gates after write.
 - Atomically rolls back all modified files on any failure; marks status `rolled_back` in log.
 - Full-path proposals require explicit human approval before `apply` will proceed.
 - Every apply, rollback, and approval is recorded in `logs/evolution-log.json`.

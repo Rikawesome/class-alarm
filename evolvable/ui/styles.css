@@ -279,11 +279,11 @@ a:focus-visible {
 .primary-button {
   width: 100%;
   color: #ffffff;
-  background: #28745b;
+  background: #257057;
 }
 
 .primary-button:hover:not(:disabled) {
-  background: #205f4a;
+  background: #174b3a;
 }
 
 button:disabled {

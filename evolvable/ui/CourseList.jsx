@@ -69,6 +69,10 @@ export default function CourseList({
 
   return (
     <div className="course-table">
+      <div style={{ padding: '8px 18px', fontSize: '11px', color: '#7a837e', background: '#fafbfa', borderBottom: '1px solid #e5e9e7', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>Timetable view</span>
+        <span>Last updated: {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+      </div>
       <div className="course-table-header" aria-hidden="true">
         <span>Course</span>
         <span>Day</span>

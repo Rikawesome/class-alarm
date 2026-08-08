@@ -1,42 +1,6 @@
-"""
-Evolution backend â€” hardened version.
 
-This rewrite fixes specific, confirmed issues found after a proposal wiped
-the working UI in the previous version. Each fix below is tied to a root
-cause, not a guess â€” see the comment at each fix for what it addresses.
 
-ROOT CAUSES FIXED:
-  1. Full-file context was truncated to 1000 chars, but "modify" operations
-     require complete replacement content -> guaranteed data loss on any
-     real file. Fixed: no truncation; oversized files force full-path
-     review instead of being silently cut.
-  2. Composition-root protection existed only as prompt text, not code.
-     Fixed: a hardcoded PROTECTED_PREFIXES list is enforced regardless of
-     what's in registry/modules.json (defense in depth, fail-closed).
-  3. generate_evolution_endpoint() hardcoded path="fast" and never called
-     the real triage function. Fixed: single shared is_fast_path() used
-     everywhere, no exceptions.
-  4. apply_proposal() never checked meta["path"] at all -- validation
-     passing was treated as sufficient to auto-apply anything. Fixed:
-     "full" path proposals now require an explicit human-approval step
-     before apply() will touch them; "fast" path still requires
-     validation to pass.
-  5. Test/build commands used shell=True with glob patterns, which does
-     not expand on Windows (cmd.exe doesn't glob) -- likely caused
-     "0 tests ran, exit code 0" being read as success. Fixed: globs are
-     expanded in Python via pathlib, and commands run with shell=False
-     and an explicit argument list, cross-platform.
-  6. Import-boundary check silently ignored any non-relative import.
-     Fixed: unresolved imports are now flagged and force full-path
-     review instead of passing silently.
-  7. No check for a proposal drastically shrinking a file it's modifying
-     -- the exact shape of a "wipe". Fixed: a size-shrink heuristic flags
-     any modify that removes a large fraction of a file's prior content.
-  8. Duplicate function definitions and two divergent, inconsistent
-     proposal pipelines. Fixed: single, consistent pipeline; duplicates
-     removed.
-"""
-
+import atexit
 import glob as globmod
 import json
 import os
@@ -45,6 +9,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -435,7 +401,7 @@ def resolve_import_path(importing_file_path: str, import_str: str) -> Optional[s
     if not import_str.startswith("."):
         return None
     importing_dir = Path(importing_file_path).parent
-    resolved = (importing_dir / import_str).resolve()
+    resolved = (ROOT / importing_dir / import_str).resolve()
     try:
         return resolved.relative_to(ROOT).as_posix()
     except ValueError:
@@ -446,14 +412,38 @@ def npm_cmd() -> str:
     return "npm.cmd" if platform.system() == "Windows" else "npm"
 
 
-def run_command(args: List[str], cwd: Optional[Path] = None) -> tuple:
+def run_command(args: List[str], cwd: Optional[Path] = None, timeout: int = 120, env_overrides: Optional[dict] = None) -> tuple:
     """
     FIX #5: takes an explicit argument list and runs with shell=False.
-    Now also accepts an explicit `cwd` (see FIX #13 below) so validation
-    can run against an isolated temp copy instead of the live repo.
+    FIX #14: every command now has a hard timeout -- nothing in this
+    pipeline should be able to hang silently and indefinitely.
+    FIX #15: accepts env_overrides so callers (namely the build step) can
+    inject DARWIN_VITE_CACHE_DIR without the caller having to manage the
+    full environment dict itself.
     """
-    res = subprocess.run(args, cwd=str(cwd or ROOT), capture_output=True, text=True, shell=False)
-    return res.returncode, res.stdout, res.stderr
+    env = os.environ.copy()
+    if env_overrides:
+        env.update(env_overrides)
+    try:
+        res = subprocess.run(
+            args, cwd=str(cwd or ROOT), capture_output=True, text=True,
+            shell=False, timeout=timeout, env=env,
+        )
+        return res.returncode, res.stdout, res.stderr
+    except subprocess.TimeoutExpired as e:
+        stdout = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
+        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
+        return (
+            -1,
+            stdout,
+            f"Command timed out after {timeout}s: {' '.join(args)}\n{stderr}",
+        )
+
+
+# FIX #15: a fixed, real, persistent location for Vite's dependency
+# pre-bundle cache -- deliberately OUTSIDE any temp validation workspace,
+# so it survives being created and deleted on every single attempt.
+VITE_CACHE_DIR = ROOT / ".darwin-vite-cache"
 
 
 def expand_globs(patterns: List[str], base: Optional[Path] = None) -> List[str]:
@@ -476,46 +466,128 @@ def expand_globs(patterns: List[str], base: Optional[Path] = None) -> List[str]:
 # which is why a change flashed briefly in the browser and then reverted,
 # and why the approval modal never got a stable proposal to render.
 #
-# Fixed: every validation attempt now runs against a disposable temp copy
-# of the workspace, never the live files. The live files are only ever
-# touched once, deliberately, inside apply_proposal() -- after validation
-# has already passed and (for full-path) a human has approved it.
+# Fixed: validation runs against a persistent, process-local temp workspace,
+# never the live files. It is initialized once, then only changed source files
+# are synchronized before each run. The live files are only ever touched once,
+# deliberately, inside apply_proposal() -- after validation has passed and
+# (for full-path) a human has approved it.
 # ---------------------------------------------------------------------------
 
 IGNORE_DIRS_FOR_COPY = {"node_modules", ".git", "dist", "build", ".vite"}
 
 
-def create_validation_workspace() -> Path:
-    tmp_root = Path(tempfile.mkdtemp(prefix="darwin_validate_"))
-    for item in ROOT.iterdir():
-        if item.name in IGNORE_DIRS_FOR_COPY or item.name.startswith("."):
-            continue
-        if item.name == "server":
-            # server/pending and server logs don't need to exist in the
-            # sandbox and can be large/irrelevant to a build+test run.
-            continue
-        dest = tmp_root / item.name
-        if item.is_dir():
-            shutil.copytree(item, dest, ignore=shutil.ignore_patterns(*IGNORE_DIRS_FOR_COPY))
-        else:
-            shutil.copy2(item, dest)
+def link_or_fail_node_modules(tmp_root: Path):
+    """
+    FIX #14 (continued): the previous version silently fell back to a full
+    recursive copy of node_modules when a symlink couldn't be created --
+    on Windows without Developer Mode/admin, that's the default, and a
+    real node_modules folder can take 10-20+ minutes to copy this way,
+    especially under antivirus real-time scanning. That silent multi-
+    minute hang, potentially repeated across auto_retry attempts, is the
+    most likely cause of a request that never seems to finish.
 
+    Fixed: try a real symlink first (fast, works on Mac/Linux and Windows
+    with dev mode). On Windows, fall back to a directory JUNCTION via
+    `mklink /J`, which -- unlike a symlink -- does NOT require admin or
+    Developer Mode. Only if both of those fail do we raise immediately,
+    with a clear message, instead of quietly starting a slow full copy.
+    """
     node_modules_src = ROOT / "node_modules"
     node_modules_dest = tmp_root / "node_modules"
-    if node_modules_src.exists():
-        try:
-            node_modules_dest.symlink_to(node_modules_src, target_is_directory=True)
-        except OSError:
-            # Symlinks can require elevated/dev-mode permissions on Windows;
-            # fall back to a real copy if that's not available. Slower, but
-            # still correct.
-            shutil.copytree(node_modules_src, node_modules_dest)
+    if not node_modules_src.exists():
+        return  # nothing to link; build/test will fail with a clear npm error anyway
 
+    try:
+        node_modules_dest.symlink_to(node_modules_src, target_is_directory=True)
+        return
+    except OSError:
+        pass
+
+    if platform.system() == "Windows":
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(node_modules_dest), str(node_modules_src)],
+            capture_output=True, text=True, shell=False,
+        )
+        if result.returncode == 0:
+            return
+
+    raise RuntimeError(
+        "Could not link node_modules into the isolated validation workspace "
+        "(symlink and junction both failed). Refusing to silently fall back "
+        "to a full copy, which can hang for many minutes on a real "
+        "node_modules folder. On Windows, enable Developer Mode "
+        "(Settings > Privacy & Security > For developers) to allow "
+        "symlinks/junctions without admin rights, then retry."
+    )
+
+
+_VALIDATION_WORKSPACE: Optional[Path] = None
+_VALIDATION_SOURCE_STATE: dict = {}
+_VALIDATION_LOCK = threading.Lock()
+
+
+def _source_files() -> dict:
+    files = {}
+    for item in ROOT.iterdir():
+        if item.name in IGNORE_DIRS_FOR_COPY or item.name.startswith(".") or item.name == "server":
+            continue
+        candidates = [item] if item.is_file() else [p for p in item.rglob("*") if p.is_file()]
+        for source in candidates:
+            relative = source.relative_to(ROOT)
+            if any(part in IGNORE_DIRS_FOR_COPY or part.startswith(".") for part in relative.parts):
+                continue
+            stat = source.stat()
+            files[relative.as_posix()] = (stat.st_size, stat.st_mtime_ns)
+    return files
+
+
+def _copy_source_file(tmp_root: Path, relative: str):
+    source = ROOT / relative
+    destination = tmp_root / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+
+
+def create_validation_workspace() -> Path:
+    """Create the isolated workspace once and reuse it across validations."""
+    global _VALIDATION_WORKSPACE, _VALIDATION_SOURCE_STATE
+    if _VALIDATION_WORKSPACE is not None and _VALIDATION_WORKSPACE.exists():
+        return _VALIDATION_WORKSPACE
+
+    tmp_root = Path(tempfile.mkdtemp(prefix="darwin_validate_"))
+    for relative in _source_files():
+        _copy_source_file(tmp_root, relative)
+    link_or_fail_node_modules(tmp_root)
+    _VALIDATION_SOURCE_STATE = _source_files()
+    _VALIDATION_WORKSPACE = tmp_root
     return tmp_root
 
 
 def cleanup_validation_workspace(tmp_root: Path):
-    shutil.rmtree(tmp_root, ignore_errors=True)
+    """Restore only proposal files; the reusable workspace remains intact."""
+    return None
+
+
+def sync_validation_workspace(tmp_root: Path):
+    """Synchronize live source changes without recopying the repository."""
+    global _VALIDATION_SOURCE_STATE
+    current = _source_files()
+    for relative, state in current.items():
+        if _VALIDATION_SOURCE_STATE.get(relative) != state:
+            _copy_source_file(tmp_root, relative)
+    for relative in set(_VALIDATION_SOURCE_STATE) - set(current):
+        stale = tmp_root / relative
+        if stale.exists():
+            stale.unlink()
+    _VALIDATION_SOURCE_STATE = current
+
+
+def _remove_validation_workspace():
+    if _VALIDATION_WORKSPACE is not None:
+        shutil.rmtree(_VALIDATION_WORKSPACE, ignore_errors=True)
+
+
+atexit.register(_remove_validation_workspace)
 
 
 def is_fast_path(proposal: ProposalOutput) -> bool:
@@ -530,6 +602,10 @@ def is_fast_path(proposal: ProposalOutput) -> bool:
         if is_protected_path(p):
             return False
         if not p.startswith("evolvable/ui/"):
+            return False
+        # Stylesheet-only changes can use lightweight validation. UI
+        # JavaScript, JSX, and markup still require a production build.
+        if Path(p).suffix.lower() not in {".css", ".scss", ".sass", ".less"}:
             return False
 
     if proposal.contract_effects.new_contract_fields or proposal.contract_effects.modified_contracts:
@@ -584,9 +660,13 @@ def validate_proposal(request_id: str) -> dict:
         "test_suite": "pending",
         "production_build": "pending",
     }
+    # FIX #16: real timing per stage, in milliseconds, so latency can be
+    # diagnosed from data instead of guessed at. Returned alongside the
+    # normal validation result and also written into the pending file.
+    timings_ms: dict = {}
 
     def fail(errs):
-        return {"valid": False, "errors": errs, "steps": steps}
+        return {"valid": False, "errors": errs, "steps": steps, "timings_ms": timings_ms}
 
     if not proposal_file.exists():
         return fail([f"Proposal {request_id} not found."])
@@ -672,16 +752,34 @@ def validate_proposal(request_id: str) -> dict:
     if errors:
         return fail(errors)
 
+    if is_fast_path(proposal):
+        # The structural and governance checks above are the meaningful gates
+        # for a stylesheet-only proposal. Avoid paying for a repository copy,
+        # production build, and full test suite for a color/style edit.
+        steps["syntax_check"] = "skipped"
+        steps["production_build"] = "skipped"
+        steps["test_suite"] = "skipped"
+        return {"valid": True, "errors": [], "steps": steps, "timings_ms": timings_ms, "path": "fast"}
+
     syntax_ok = True
+    _t0 = time.monotonic()
+    _VALIDATION_LOCK.acquire()
+    workspace = None
+    workspace_backups = {}
     try:
         workspace = create_validation_workspace()
+        sync_validation_workspace(workspace)
     except Exception as e:
+        _VALIDATION_LOCK.release()
         return fail([f"Failed to create isolated validation workspace: {e}"])
+    timings_ms["workspace_copy"] = round((time.monotonic() - _t0) * 1000)
 
     try:
         for op in proposal.operations:
             path = (workspace / op.path).resolve()
             path.relative_to(workspace)  # guard against a path escaping the sandbox
+            if op.path not in workspace_backups:
+                workspace_backups[op.path] = path.read_bytes() if path.exists() else None
             if op.action in ("create", "modify"):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(op.content or "", encoding="utf-8")
@@ -689,6 +787,7 @@ def validate_proposal(request_id: str) -> dict:
                 if path.exists():
                     path.unlink()
 
+        _t0 = time.monotonic()
         for op in proposal.operations:
             # node --check cannot parse JSX syntax; Vite handles .jsx in the
             # build step below, so only run the node checker on plain .js files.
@@ -697,11 +796,17 @@ def validate_proposal(request_id: str) -> dict:
                 if ret != 0:
                     errors.append(f"Syntax error in {op.path}:\n{err or out}")
                     syntax_ok = False
+        timings_ms["syntax_check"] = round((time.monotonic() - _t0) * 1000)
         steps["syntax_check"] = "pass" if syntax_ok else "fail"
         if not syntax_ok:
             return fail(errors)
 
-        ret, out, err = run_command([npm_cmd(), "run", "build"], cwd=workspace)
+        _t0 = time.monotonic()
+        ret, out, err = run_command(
+            [npm_cmd(), "run", "build"], cwd=workspace,
+            env_overrides={"DARWIN_VITE_CACHE_DIR": str(VITE_CACHE_DIR)},
+        )
+        timings_ms["production_build"] = round((time.monotonic() - _t0) * 1000)
         if ret != 0:
             errors.append(f"Production build failed:\n{err or out}")
             steps["production_build"] = "fail"
@@ -724,7 +829,13 @@ def validate_proposal(request_id: str) -> dict:
             steps["test_suite"] = "fail"
             return fail(errors)
 
-        ret, out, err = run_command(["node", "--test", *test_files], cwd=workspace)
+        _t0 = time.monotonic()
+        # SQLite-backed test files share one isolated database. Run test files
+        # serially so parallel module initialization cannot race on WAL setup.
+        ret, out, err = run_command(
+            ["node", "--test", "--test-concurrency=1", *test_files], cwd=workspace
+        )
+        timings_ms["test_suite"] = round((time.monotonic() - _t0) * 1000)
         if ret != 0:
             errors.append(f"Test suite failed:\n{err or out}")
             steps["test_suite"] = "fail"
@@ -735,11 +846,20 @@ def validate_proposal(request_id: str) -> dict:
         errors.append(f"Error during isolated validation: {e}")
         return fail(errors)
     finally:
-        # FIX #13: the temp workspace is always discarded, whether validation
-        # passed or failed -- the live repo was never touched in the first place.
+        # Proposal files are restored whether validation passes or fails; the
+        # reusable workspace and the live repo remain separate.
+        for relative, original_bytes in workspace_backups.items():
+            path = workspace / relative
+            if original_bytes is None:
+                if path.exists():
+                    path.unlink()
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(original_bytes)
         cleanup_validation_workspace(workspace)
+        _VALIDATION_LOCK.release()
 
-    return {"valid": True, "errors": [], "steps": steps}
+    return {"valid": True, "errors": [], "steps": steps, "timings_ms": timings_ms}
 
 
 def apply_proposal(request_id: str, human_approved: bool = False) -> dict:
@@ -749,14 +869,15 @@ def apply_proposal(request_id: str, human_approved: bool = False) -> dict:
 
     data = json.loads(proposal_file.read_text(encoding="utf-8"))
     meta = data.get("meta", {})
+    proposal = ProposalOutput.model_validate(data.get("proposal", {}))
+    actual_path_type = "fast" if is_fast_path(proposal) else "full"
 
     # FIX #4: the path label now actually gates something. "full" path
     # proposals may not be applied without an explicit prior approval step.
-    path_type = meta.get("path")
-    if path_type != "fast" and not (human_approved or meta.get("human_approved")):
+    if actual_path_type != "fast" and not (human_approved or meta.get("human_approved")):
         return {
             "success": False,
-            "error": f"Proposal is '{path_type}' path and has not been human-approved. "
+            "error": f"Proposal is '{actual_path_type}' path and has not been human-approved. "
                      f"Call the approve endpoint first, or fast-path eligibility must be re-verified.",
         }
 
@@ -764,7 +885,6 @@ def apply_proposal(request_id: str, human_approved: bool = False) -> dict:
     if not validation.get("valid"):
         return {"success": False, "error": "Cannot apply invalid proposal.", "validation": validation}
 
-    proposal = ProposalOutput.model_validate(data.get("proposal", {}))
     backups, created_files = {}, []
 
     try:
@@ -794,7 +914,10 @@ def apply_proposal(request_id: str, human_approved: bool = False) -> dict:
                 if ret != 0:
                     raise RuntimeError(f"Syntax error in {op.path}:\n{err or out}")
 
-        ret, out, err = run_command([npm_cmd(), "run", "build"])
+        ret, out, err = (0, "", "") if actual_path_type == "fast" else run_command(
+            [npm_cmd(), "run", "build"],
+            env_overrides={"DARWIN_VITE_CACHE_DIR": str(VITE_CACHE_DIR)},
+        )
         if ret != 0:
             raise RuntimeError(f"Production build failed:\n{err or out}")
 
@@ -804,9 +927,11 @@ def apply_proposal(request_id: str, human_approved: bool = False) -> dict:
             "evolvable/*/tests/*.test.js",
             "app/tests/*.test.js",
         ])
-        if not test_files:
+        if actual_path_type != "fast" and not test_files:
             raise RuntimeError("No test files found â€” refusing to apply without a real test run.")
-        ret, out, err = run_command(["node", "--test", *test_files])
+        ret, out, err = (0, "", "") if actual_path_type == "fast" else run_command(
+            ["node", "--test", "--test-concurrency=1", *test_files]
+        )
         if ret != 0:
             raise RuntimeError(f"Test suite failed:\n{err or out}")
 
@@ -875,11 +1000,15 @@ async def get_proposal(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-def _generate_proposal(client, model_name: str, system_prompt: str, context: str) -> ProposalOutput:
+def _generate_proposal(client, model_name: str, system_prompt: str, context: str) -> tuple:
     """
     Single Gemini call â†’ validated ProposalOutput.
     Separated so the retry loop can call it with different context each time.
+    FIX #16: now also returns elapsed generation time in ms, since this is
+    one of the real candidate causes of overall latency (worth measuring
+    directly rather than assuming it's fast).
     """
+    _t0 = time.monotonic()
     response = client.models.generate_content(
         model=model_name,
         contents=context,
@@ -890,6 +1019,7 @@ def _generate_proposal(client, model_name: str, system_prompt: str, context: str
             temperature=0.1,
         ),
     )
+    generation_ms = round((time.monotonic() - _t0) * 1000)
     proposal = ProposalOutput.model_validate(json.loads(response.text))
     validate_file_paths(proposal)
 
@@ -900,7 +1030,7 @@ def _generate_proposal(client, model_name: str, system_prompt: str, context: str
                 if resolve_import_path(op.path, imp) is None:
                     unresolved.append(imp)
     proposal.unresolved_imports = unresolved
-    return proposal
+    return proposal, generation_ms
 
 
 def _run_auto_evolve_loop(
@@ -956,7 +1086,7 @@ def _run_auto_evolve_loop(
             context = build_retry_context(req_text, failure_chain, [])
 
         try:
-            proposal = _generate_proposal(client, model_name, system_prompt, context)
+            proposal, generation_ms = _generate_proposal(client, model_name, system_prompt, context)
         except Exception as gen_err:
             error_msg = str(gen_err)
             append_log({
@@ -984,6 +1114,7 @@ def _run_auto_evolve_loop(
             "plan": proposal.plan,
             "files_touched": proposal.files_touched,
             "attempt": attempt,
+            "generation_ms": generation_ms,
             "failure_chain": failure_chain,
         }
         pending_file = PENDING_DIR / f"{attempt_id}.json"
@@ -995,7 +1126,10 @@ def _run_auto_evolve_loop(
         validation = validate_proposal(attempt_id)
 
         if validation.get("valid"):
-            append_log({**attempt_record, "status": "pending_review"})
+            append_log({
+                **attempt_record, "status": "pending_review",
+                "validation_timings_ms": validation.get("timings_ms", {}),
+            })
             return JSONResponse({
                 "id": attempt_id,
                 "session_id": session_id,
@@ -1005,6 +1139,8 @@ def _run_auto_evolve_loop(
                 "files_touched": proposal.files_touched,
                 "attempts": attempt,
                 "failure_chain": failure_chain,
+                "generation_ms": generation_ms,
+                "validation_timings_ms": validation.get("timings_ms", {}),
             })
 
         steps = validation.get("steps", {})
@@ -1150,7 +1286,7 @@ async def evolve(request: Request):
     # --- Standard single-shot path (original behaviour) ---
     try:
         context = build_evolution_context(req_text)
-        proposal = _generate_proposal(client, model_name, system_prompt, context)
+        proposal, generation_ms = _generate_proposal(client, model_name, system_prompt, context)
 
         fast = is_fast_path(proposal)
         path_type = "fast" if fast else "full"
@@ -1159,6 +1295,7 @@ async def evolve(request: Request):
             "id": session_id, "timestamp": now_iso, "request": req_text, "model": model_name,
             "path": path_type, "status": "pending_review", "human_approved": False,
             "plan": proposal.plan, "files_touched": proposal.files_touched,
+            "generation_ms": generation_ms,
             "failure_chain": [],
         }
         pending_file = PENDING_DIR / f"{session_id}.json"

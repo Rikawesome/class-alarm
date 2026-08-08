@@ -187,7 +187,7 @@ Natural language code evolution requires strict mechanical guardrails before pro
 
 **2. How we implemented it**
 
-We integrated a configurable Google Gemini model using the Google GenAI SDK with structured response validation (`response_schema=ProposalOutput`). The current default is `gemini-3.5-flash-lite`, and deployments may override it with `DARWIN_MODEL`. The evolution server (`server/main.py`) validates requested file paths against path traversal attacks, evaluates fast-path vs. full-path eligibility, stores pending proposals in `server/pending/{id}.json`, records all successes and failures in `logs/evolution-log.json`, and leaves working application files untouched during generation. A comprehensive test suite (`server/tests/test_server.py`) verifies proposal generation, schema enforcement, failure logging, and inspection APIs.
+We integrated a configurable Google Gemini model using the Google GenAI SDK with structured response validation (`response_schema=ProposalOutput`). The current default is `gemini-2.5-flash`, and deployments may override it with `DARWIN_MODEL`. The evolution server (`server/main.py`) validates requested file paths against path traversal attacks, evaluates fast-path vs. full-path eligibility, stores pending proposals in `server/pending/{id}.json`, records all successes and failures in `logs/evolution-log.json`, and leaves working application files untouched during generation. A comprehensive test suite (`server/tests/test_server.py`) verifies proposal generation, schema enforcement, failure logging, and inspection APIs.
 
 ---
 
@@ -297,3 +297,40 @@ AI code generation fails when treated as a single prompt-response black box. Gen
 **3. How it applies elsewhere**
 
 Engineering autonomous systems requires treating changes as multi-step compilation pipelines—intent analysis, architectural planning, static validation, isolated testing, and transactional deployment—rather than trusting raw LLM output.
+
+---
+
+## 2026-08-08 - Reduce validation latency without weakening isolation
+
+**1. What this teaches the system**
+
+Validation cost must be proportional to proposal risk. Recreating a complete
+temporary repository for every proposal can dominate total latency on Windows,
+while removing isolation would reintroduce live-file and rollback hazards.
+
+**2. How we implemented it**
+
+Stylesheet-only UI proposals now stop after path, ownership, dependency, and
+content-integrity checks. Code-changing proposals continue through isolated
+syntax, build, and test gates, but reuse one process-local validation workspace,
+link the existing dependency tree, synchronize changed source files, and restore
+proposal files after each run. Apply recalculates the proposal path from its
+contents so stale metadata cannot bypass full-path approval.
+
+The live JSX test exposed a separate concurrency issue: Node ran SQLite-backed
+test files in parallel, and simultaneous WAL initialization caused a transient
+`database is locked` failure. Validation and apply now invoke Node with
+`--test-concurrency=1`, keeping the isolated database fixture deterministic.
+The obsolete Python tests for removed planner endpoints were deleted, and the
+remaining server tests were updated for the current proposal schema, CSS-only
+fast path, and protected import boundary. The focused server suite now passes
+10/10, while the application suite passes 14/14.
+
+**3. How it applies elsewhere**
+
+Build systems, migration tools, and infrastructure agents should separate cheap
+policy checks from expensive execution checks, cache stable environments, and
+retain isolation around untrusted changes. The transferable rule is to optimize
+the validation boundary rather than weakening it. Test suites must also evolve
+with route and contract changes; otherwise stale tests create noise instead of
+detecting regressions.
