@@ -198,15 +198,46 @@ a:focus-visible {
   gap: 9px;
 }
 
-.live-clock {
-  gap: 7px;
-  min-height: 38px;
-  padding: 0 11px;
-  color: #4f5a54;
-  background: #f2f5f3;
-  border-radius: 6px;
-  font-size: 13px;
+.modern-live-clock {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: linear-gradient(135deg, #173f35 0%, #28745b 100%);
+  color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(40, 116, 91, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.clock-icon-glow {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+  color: #e8b84a;
+}
+
+.clock-time-display {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.time-main {
+  font-size: 14px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.time-date-sub {
+  font-size: 10px;
+  color: #bad0c8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .icon-button,
@@ -389,7 +420,7 @@ button:disabled {
   display: grid;
   grid-template-columns:
     minmax(190px, 1.45fr) minmax(92px, 0.65fr) minmax(130px, 0.8fr)
-    minmax(96px, 0.6fr) 42px;
+    minmax(96px, 0.6fr) auto;
   gap: 14px;
   align-items: center;
 }
@@ -746,7 +777,7 @@ button:disabled {
     margin-top: 14px;
   }
 
-  .live-clock {
+  .modern-live-clock {
     display: none;
   }
 
@@ -843,6 +874,7 @@ button:disabled {
   display: flex;
   gap: 8px;
   align-items: center;
+  justify-content: flex-end;
 }
 
 .panel-actions {
@@ -949,9 +981,9 @@ button:disabled {
   color: #f8fafc;
 }
 
-.dark-theme .live-clock {
-  background: #334155;
-  color: #cbd5e1;
+.dark-theme .modern-live-clock {
+  background: linear-gradient(135deg, #0f2d24 0%, #173f35 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .dark-theme .secondary-button {
@@ -1024,6 +1056,16 @@ button:disabled {
 .dark-theme .risk-badge:hover {
   background: rgba(124, 45, 18, 0.5);
   border-color: rgba(249, 115, 22, 0.6);
+}
+
+.dark-theme .icon-button {
+  color: #94a3b8;
+  background: #334155;
+}
+
+.dark-theme .icon-button:hover:not(:disabled) {
+  color: #f8fafc;
+  background: #475569;
 }
 
 .dark-theme .runtime-strip {

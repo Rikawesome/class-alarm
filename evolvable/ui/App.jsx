@@ -12,10 +12,15 @@ function LiveClock() {
     return () => clearInterval(id);
   }, []);
   return (
-    <span className="live-clock">
-      <Clock size={14} />
-      {time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-    </span>
+    <div className="modern-live-clock">
+      <div className="clock-icon-glow">
+        <Clock size={16} />
+      </div>
+      <div className="clock-time-display">
+        <span className="time-main">{time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+        <span className="time-date-sub">{time.toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
+      </div>
+    </div>
   );
 }
 
