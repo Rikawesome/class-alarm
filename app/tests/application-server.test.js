@@ -129,3 +129,26 @@ test("risk state persists through the injected personal-data capability", async 
   restartedRuntime.toggleCourseRisk(selectedCourse.id, false);
   restartedRuntime.stop();
 });
+
+test("routes generic extension state and actions through the runtime host", async () => {
+  const initialResponse = await fetch(`${baseUrl}/api/extensions/weekly-goals`);
+  const initial = await initialResponse.json();
+  assert.equal(initialResponse.status, 200);
+  assert.ok(Array.isArray(initial.state));
+
+  const addResponse = await fetch(`${baseUrl}/api/extensions/weekly-goals`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "add", input: { title: "Test engine route" } }),
+  });
+  const added = await addResponse.json();
+  assert.equal(addResponse.status, 200);
+  assert.equal(added.result.at(-1).title, "Test engine route");
+
+  const deleteResponse = await fetch(`${baseUrl}/api/extensions/weekly-goals`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "delete", input: { id: added.result.at(-1).id } }),
+  });
+  assert.equal(deleteResponse.status, 200);
+});

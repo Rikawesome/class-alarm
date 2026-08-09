@@ -173,46 +173,92 @@ status: **Complete**. Step 6 is complete; Step 7 is next.
 
 ### Step 7 - Evolve a weekly goals capability
 
-Status: **Pending**
+Status: **Complete**
+
+#### Step 7.0 - Establish the generic extension boundary
+
+7.0a status: **Complete**. Architecture review identified the required
+human-reviewed registration path, protected generic capability composition, and
+the undeclared `app-runtime` dependency on `personal-data`.
+
+7.0b status: **Complete**. `docs/extension-contract.md` defines the protected
+registry descriptor, feature manifest request, capability vocabulary, runtime
+factory interface, entry containment, enablement, registry precedence,
+registration review, and failure behavior. No runtime or feature implementation
+is included.
+
+7.0c status: **Complete**. Trusted governance validates structured new-module
+registration requests in isolation and writes protected registry authority plus
+the human-reviewed feature manifest only after explicit approval. The
+composition root discovers enabled registry descriptors, verifies exact
+manifest agreement and entry containment, injects only known authorized
+capabilities, and isolates feature load failures. `app-runtime` now declares
+its `personal-data` dependency, with focused governance, runtime, and evolution
+server coverage.
+
+#### Step 7.1 - Add the first registered feature
+
+Status: **Complete** (2026-08-09). The first registered feature was generated,
+reviewed, approved, applied, and refined through the evolution workflow.
 
 Target request:
 
 > Add a weekly goals page.
 
-Expected result:
+Delivered result:
 
 - A new feature module and contract.
 - Feature-owned persistent goal data.
-- A view registered through a controlled UI extension point.
+- A view integrated into `evolvable/ui/App.jsx` and served through the generic
+  application extension API.
 - Create, complete, and review weekly goals.
 - No modification to protected scheduling or course storage.
 
 Acceptance criteria:
 
-- The feature is proposed, validated, reviewed or applied, and logged.
-- Goal data survives restart.
+- The feature was proposed, validated, approved, applied, and logged.
+- Goal data persists through the namespace-bound personal-storage capability.
 - All protected baseline tests still pass.
+
+The live cycle also exposed and fixed two engine-level gaps: generated UI must
+declare and prove its integration entry point, and interactive extensions need a
+generic HTTP route from the browser to the runtime host. These are now reusable
+contracts rather than Weekly Goals-specific wiring.
 
 ### Step 8 - Evolve a revision planner capability
 
-Status: **Pending**
+Status: **Complete** (2026-08-09)
 
 Target request:
 
 > Create a revision planner.
 
-Expected result:
+Delivered result:
 
 - Revision sessions reference courses through read-only IDs.
 - Planning records use feature-owned storage.
 - Suggestions cannot modify protected alarm timing.
 - The view uses the same extension mechanism as weekly goals.
+- Registry changes now trigger a controlled automatic extension reload, so a
+  newly approved feature becomes available without a manual Node restart.
 
 Acceptance criteria:
 
 - The second feature needs fewer architectural changes than the first.
 - Weekly goals and class alarms continue working.
 - Cross-feature dependencies are declared and validated.
+
+The live Revision Planner cycle also confirmed the need for automatic activation
+after approval. The host now watches the protected registry, reloads it through
+the same validation boundary, and keeps the prior working host if reload fails.
+
+### Evolution UX polish - Complete (2026-08-09)
+
+The evolution chat now uses product language during waits and review:
+“Listening to your idea…”, “Checking the protected boundaries…”, “Testing the
+evolution…”, and “Preparing it for your review…”. Technical failures are
+summarized conversationally while detailed diagnostics remain available in the
+proposal records.
 
 ### Step 9 - Turn validated lessons into system policy
 

@@ -4,6 +4,7 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 
+import { defaultExtensionHost } from "./extensions.js";
 import { createRiskFlag } from "../evolvable/features/risk-flag/index.js";
 import { getSafeAlarmDisplayData } from "../locked/alarm-engine/alarm-display.js";
 import { scheduleCourseAlarms } from "../locked/alarm-engine/scheduler.js";
@@ -29,6 +30,7 @@ export function createClassAlarmRuntime({
   clearTimer = clearTimeout,
   scheduleDailyRefresh = true,
   riskStorage = createPersonalDataCapabilityForModule("risk-flag"),
+  extensionHost = defaultExtensionHost,
 } = {}) {
   const riskFlag = createRiskFlag({ storage: riskStorage });
   const displayFormatter = alarmDisplayFormatter ?? riskFlag.getAlarmDisplayData;
@@ -174,6 +176,7 @@ export function createClassAlarmRuntime({
       scheduledAlarms: publicAlarms,
       nextAlarm: publicAlarms[0] ?? null,
       recentNotifications,
+      extensions: extensionHost.getState(),
     };
   }
 
@@ -203,6 +206,8 @@ export function createClassAlarmRuntime({
 
   return {
     addCourse,
+    executeExtension: extensionHost.execute,
+    reloadExtensions: extensionHost.reload,
     getSnapshot,
     importCourses,
     listCourses,

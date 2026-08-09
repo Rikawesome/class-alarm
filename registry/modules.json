@@ -29,9 +29,15 @@
         "version": 1,
         "record": {
           "type": "object",
-          "required": ["isRisky"],
+          "required": [
+            "isRisky"
+          ],
           "additionalProperties": false,
-          "properties": {"isRisky": {"type": "boolean"}}
+          "properties": {
+            "isRisky": {
+              "type": "boolean"
+            }
+          }
         }
       }
     },
@@ -74,6 +80,58 @@
       "contract": "governance/module.json",
       "role": "governance-control-plane",
       "evolution_policy": "locked"
+    },
+    "weekly-goals": {
+      "path": "evolvable/features/weekly-goals",
+      "contract": "evolvable/features/weekly-goals/module.json",
+      "role": "feature",
+      "evolution_policy": "evolvable",
+      "extension": {
+        "contract_version": "1.0",
+        "enabled": true,
+        "runtime": {
+          "entry": "index.js",
+          "factory_export": "createExtension"
+        },
+        "authorized_capabilities": [
+          "personal-storage"
+        ]
+      },
+      "storage_namespace": "weekly-goals",
+      "storage_schema": {
+        "version": 1,
+        "record": {
+          "title": "string",
+          "completed": "boolean"
+        }
+      }
+    },
+    "revision-planner": {
+      "path": "evolvable/features/revision-planner",
+      "contract": "evolvable/features/revision-planner/module.json",
+      "role": "feature",
+      "evolution_policy": "evolvable",
+      "extension": {
+        "contract_version": "1.0",
+        "enabled": true,
+        "runtime": {
+          "entry": "index.js",
+          "factory_export": "createExtension"
+        },
+        "authorized_capabilities": [
+          "personal-storage"
+        ]
+      },
+      "storage_namespace": "revision-planner",
+      "storage_schema": {
+        "version": 1,
+        "record": {
+          "topic": "string",
+          "courseId": "string",
+          "date": "string",
+          "completed": "boolean"
+        }
+      }
     }
   },
   "artifacts": {

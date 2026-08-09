@@ -1129,3 +1129,23 @@ button:disabled {
   color: #f8fafc;
   border: 1px solid #475569;
 }
+
+/* Dark Theme Overrides for Weekly Goals */
+.dark-theme .panel input[type="text"] {
+  background: #0f172a;
+  color: #f8fafc;
+  border: 1px solid #475569;
+}
+
+.dark-theme .panel li {
+  background: #0f172a !important;
+  border: 1px solid #334155 !important;
+}
+
+.dark-theme .panel li span {
+  color: #f8fafc !important;
+}
+
+.dark-theme .panel li label {
+  color: #f8fafc !important;
+}

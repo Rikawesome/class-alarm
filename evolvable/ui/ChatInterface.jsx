@@ -3,6 +3,14 @@ import { Sparkles, X } from 'lucide-react';
 import './ChatInterface.css';
 
 export default function ChatInterface({ onProposal }) {
+  const progressMessages = [
+    'Listening to your idea…',
+    'Tracing where this belongs…',
+    'Checking the protected boundaries…',
+    'Growing the new capability…',
+    'Testing the evolution…',
+    'Preparing it for your review…',
+  ];
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([
     { role: 'system', text: 'Ask me to evolve the app - e.g. "Add a countdown timer to each course row".' }
@@ -27,7 +35,14 @@ export default function ChatInterface({ onProposal }) {
 
     // Add a temporary status message to show we're working
     const tempId = Date.now();
-    setMessages(m => [...m, { role: 'status', text: 'Working on your request...', id: tempId }]);
+    setMessages(m => [...m, { role: 'status', text: progressMessages[0], id: tempId }]);
+    let progressIndex = 0;
+    const progressTimer = setInterval(() => {
+      progressIndex = (progressIndex + 1) % progressMessages.length;
+      setMessages(m => m.map(msg =>
+        msg.id === tempId ? { ...msg, text: progressMessages[progressIndex] } : msg,
+      ));
+    }, 2200);
 
     try {
       const res = await fetch('http://localhost:8000/evolve', {
@@ -41,7 +56,7 @@ export default function ChatInterface({ onProposal }) {
       setMessages(m => m.filter(msg => msg.id !== tempId));
 
       if (!res.ok) {
-        setMessages(m => [...m, { role: 'error', text: data.error || 'Server error.' }]);
+        setMessages(m => [...m, { role: 'error', text: 'This evolution could not safely take root. ' + (data.error || 'Please try a different request.') }]);
       } else {
         // Handle different response types from the auto_retry endpoint
         if (data.status === 'pending_review') {
@@ -53,7 +68,7 @@ export default function ChatInterface({ onProposal }) {
               text: "I've successfully implemented your request after " + attemptCount + " attempt(s). You can review the changes below."
             }]);
           } else {
-            setMessages(m => [...m, { role: 'status', text: 'Your request has been successfully implemented!' }]);
+            setMessages(m => [...m, { role: 'status', text: 'The evolution is ready for your review.' }]);
           }
 
           // Show the proposal
@@ -116,8 +131,9 @@ export default function ChatInterface({ onProposal }) {
     } catch (err) {
       // Remove the temporary status message
       setMessages(m => m.filter(msg => msg.id !== tempId));
-      setMessages(m => [...m, { role: 'error', text: 'Could not reach evolution server. Please try again later.' }]);
+          setMessages(m => [...m, { role: 'error', text: 'The evolution server is out of reach right now. Please try again in a moment.' }]);
     } finally {
+      clearInterval(progressTimer);
       setLoading(false);
     }
   }

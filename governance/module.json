@@ -8,12 +8,13 @@
     "governance/**"
   ],
   "exposes": {
-    "registry/modules.json": "module discovery, ownership, and policy index"
+    "registry/modules.json": "module discovery, ownership, policy, extension enablement, and capability authority index"
   },
   "depends_on": [],
   "invariants": [
     "every registered module has one canonical local contract",
     "registry entries and local contracts agree on identity and policy",
+    "protected extension descriptors authorize enablement and capabilities while feature manifests only request them",
     "protected invariant tests cannot be modified by evolution requests"
   ],
   "file_policies": {
@@ -26,6 +27,6 @@
     "existing_tests": "locked",
     "new_tests": "human-review"
   },
-  "version": "1.0.0",
-  "last_updated": "2026-07-31"
+  "version": "1.1.0",
+  "last_updated": "2026-08-09"
 }

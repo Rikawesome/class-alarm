@@ -1,0 +1,30 @@
+{
+  "module": "weekly-goals",
+  "role": "feature",
+  "evolution_policy": "evolvable",
+  "owns": [
+    "evolvable/features/weekly-goals/**"
+  ],
+  "file_policies": {
+    "module.json": "human-review",
+    "index.js": "evolvable"
+  },
+  "storage_namespace": "weekly-goals",
+  "storage_schema": {
+    "version": 1,
+    "record": {
+      "title": "string",
+      "completed": "boolean"
+    }
+  },
+  "extension": {
+    "contract_version": "1.0",
+    "runtime": {
+      "entry": "index.js",
+      "factory_export": "createExtension"
+    },
+    "requested_capabilities": [
+      "personal-storage"
+    ]
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "module": "revision-planner",
+  "role": "feature",
+  "evolution_policy": "evolvable",
+  "owns": [
+    "evolvable/features/revision-planner/**"
+  ],
+  "file_policies": {
+    "module.json": "human-review",
+    "index.js": "evolvable"
+  },
+  "storage_namespace": "revision-planner",
+  "storage_schema": {
+    "version": 1,
+    "record": {
+      "topic": "string",
+      "courseId": "string",
+      "date": "string",
+      "completed": "boolean"
+    }
+  },
+  "extension": {
+    "contract_version": "1.0",
+    "runtime": {
+      "entry": "index.js",
+      "factory_export": "createExtension"
+    },
+    "requested_capabilities": [
+      "personal-storage"
+    ]
+  }
+}

@@ -1,5 +1,6 @@
 ﻿import { createReadStream, existsSync } from "node:fs";
-import { createServer } from "node:http";
+import { unwatchFile, watchFile } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -93,7 +94,22 @@ export async function createApplicationServer({
     }
   });
 
-  const server = createServer(async (request, response) => {
+  const registryPath = resolve(ROOT, "registry", "modules.json");
+  let reloadInFlight = null;
+  const reloadRegistry = async () => {
+    if (typeof runtime.reloadExtensions !== "function") return;
+    if (!reloadInFlight) {
+      reloadInFlight = runtime.reloadExtensions().finally(() => {
+        reloadInFlight = null;
+      });
+    }
+    await reloadInFlight;
+  };
+  watchFile(registryPath, { interval: 500 }, () => {
+    void reloadRegistry().catch(() => {});
+  });
+
+  const server = createHttpServer(async (request, response) => {
     const requestUrl = new URL(request.url, "http://127.0.0.1");
     const pathname = requestUrl.pathname.replace(/\/+$/, "") || "/";
 
@@ -111,6 +127,30 @@ export async function createApplicationServer({
           courses: runtime.listCourses(),
           runtime: runtime.getSnapshot(),
         });
+        return;
+      }
+
+      const extensionMatch = pathname.match(/^\/api\/extensions\/([a-z0-9][a-z0-9-]*)$/);
+      if (extensionMatch && request.method === "GET") {
+        const moduleId = extensionMatch[1];
+        const state = runtime.getSnapshot().extensions?.[moduleId];
+        if (state === undefined) {
+          sendJson(response, 404, { error: `Extension '${moduleId}' is unavailable.` });
+          return;
+        }
+        sendJson(response, 200, { state });
+        return;
+      }
+
+      if (extensionMatch && request.method === "POST") {
+        const moduleId = extensionMatch[1];
+        const body = await readJsonBody(request);
+        const result = await runtime.executeExtension(
+          moduleId,
+          body.action,
+          body.input ?? {},
+        );
+        sendJson(response, 200, { result });
         return;
       }
 
@@ -256,6 +296,7 @@ export async function createApplicationServer({
   }
 
   async function close() {
+    unwatchFile(registryPath);
     removeNotificationListener();
     runtime.stop();
     closeCourseDatabase();

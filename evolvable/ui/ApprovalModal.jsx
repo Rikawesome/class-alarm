@@ -10,10 +10,10 @@ export default function ApprovalModal({ proposal, onApprove, onDismiss }) {
     setError('');
     try {
       const approveRes = await fetch('http://localhost:8000/proposals/' + proposal.id + '/approve', { method: 'POST' });
-      if (!approveRes.ok) throw new Error('Approve step failed');
+      if (!approveRes.ok) throw new Error('The evolution could not be approved safely.');
       const applyRes = await fetch('http://localhost:8000/proposals/' + proposal.id + '/apply', { method: 'POST' });
       const applyData = await applyRes.json();
-      if (!applyRes.ok || !applyData.success) throw new Error(applyData.error || 'Apply failed');
+      if (!applyRes.ok || !applyData.success) throw new Error('The evolution could not take root. ' + (applyData.error || 'Please review the proposal and try again.'));
       setStatus('applied');
       if (onApprove) onApprove(applyData);
     } catch (err) {
@@ -49,7 +49,7 @@ export default function ApprovalModal({ proposal, onApprove, onDismiss }) {
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <button className="secondary-button small-button" onClick={onDismiss} disabled={loading}>Dismiss</button>
             <button className="primary-button small-button" style={{ width: 'auto' }} onClick={handleApprove} disabled={loading}>
-              {loading ? 'Applying...' : 'Approve & Apply'}
+              {loading ? 'Helping it take root…' : 'Approve & Apply'}
             </button>
           </div>
         )}

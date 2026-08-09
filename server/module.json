@@ -12,7 +12,9 @@
     "GET /proposals": "list proposal and failure audit records",
     "GET /proposals/:request_id": "inspect one stored pending proposal",
     "POST /evolve": "create, classify, store, and log an evolution proposal",
-    "POST /proposals/:request_id/validate": "mechanically validate a pending proposal against safety and architecture gates"
+    "POST /proposals/:request_id/validate": "mechanically validate a pending proposal against safety and architecture gates",
+    "POST /proposals/:request_id/approve": "record explicit human approval and install a validated protected registration transaction when requested",
+    "POST /proposals/:request_id/apply": "revalidate and apply an approved proposal with rollback on failure"
   },
   "depends_on": [
     "governance"
@@ -20,6 +22,8 @@
   "invariants": [
     "loads canonical contracts through registry/modules.json",
     "never treats generated output as trusted code",
+    "general proposal operations never write registry/ or a new module.json",
+    "new feature registration writes registry authority only after deterministic validation and explicit human approval",
     "records every evolution attempt"
   ],
   "file_policies": {
@@ -27,6 +31,6 @@
     "*.py": "locked",
     "pending/**": "generated-artifact"
   },
-  "version": "1.1.0",
-  "last_updated": "2026-08-05"
+  "version": "1.2.0",
+  "last_updated": "2026-08-09"
 }

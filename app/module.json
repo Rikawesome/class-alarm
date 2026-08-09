@@ -7,6 +7,7 @@
     "app/**"
   ],
   "exposes": {
+    "genericExtensionHost": "registry-authorized extension discovery, state collection, and action dispatch",
     "GET /api/bootstrap": "read-only course and runtime state",
     "GET /api/events": "alarm notification event stream",
     "POST /api/alarms/test": "fire a non-scheduled demonstration notification",
@@ -18,10 +19,14 @@
   "depends_on": [
     "core-data",
     "alarm-engine",
+    "personal-data",
     "risk-flag"
   ],
   "invariants": [
     "evolvable modules receive no database implementation",
+    "evolvable modules cannot import the protected extension loader",
+    "runtime extensions load only from enabled protected registry descriptors",
+    "runtime extension capabilities are the exact registry-authorized and manifest-requested set",
     "the application runs without the evolution server",
     "scheduled alarm timing remains owned by alarm-engine"
   ],
@@ -35,6 +40,6 @@
     "existing_tests": "locked",
     "new_tests": "human-review"
   },
-  "version": "1.2.0",
-  "last_updated": "2026-08-05"
+  "version": "1.3.0",
+  "last_updated": "2026-08-09"
 }

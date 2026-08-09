@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { BookOpen, Clock, AlarmClock, Zap, Plus, Sun, Moon } from 'lucide-react';
+import { BookOpen, Clock, AlarmClock, Zap, Plus, Sun, Moon, CheckSquare } from 'lucide-react';
 import CourseList from './CourseList.jsx';
 import AddCourseModal from './AddCourseModal.jsx';
 import ApprovalModal from './ApprovalModal.jsx';
 import ChatInterface from './ChatInterface.jsx';
+import WeeklyGoals from './WeeklyGoals.jsx';
+import RevisionPlanner from './RevisionPlanner.jsx';
 
 function LiveClock() {
   const [time, setTime] = useState(new Date());
@@ -217,6 +219,9 @@ export default function App() {
               onToggleRisk={handleToggleRisk}
             />
           </div>
+
+          <WeeklyGoals />
+          <RevisionPlanner courses={courses} />
         </main>
       </div>
 

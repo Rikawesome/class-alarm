@@ -26,6 +26,101 @@ Explain how the lesson transfers to another feature, application, or domain.
 
 ---
 
+## 2026-08-09 - Complete the first end-to-end registered feature
+
+**1. What this teaches the system**
+
+Passing an extension contract and compiling a UI is not enough to prove that a
+feature works. A complete evolution must connect the generated feature to the
+visible UI and provide a generic host transport for its actions. Integration
+metadata must be checked against actual proposed file content, not just against
+`files_touched` declarations.
+
+**2. How we implemented it**
+
+The Weekly Goals request was generated, registered, approved, applied, and
+refined through Darwin. The feature uses the generic `getState`/`execute`
+runtime contract and namespace-bound personal storage. The application host now
+serves generic `GET` and `POST /api/extensions/<module-id>` endpoints. The
+evolution engine requires `ui_integration`, verifies that the declared UI entry
+file renders the declared feature marker, and verifies applied files against the
+approved operations. The full JavaScript suite passes 32 tests and the Python
+server suite passes 21 tests.
+
+**3. How it applies elsewhere**
+
+Plugin, workflow, and automation systems should test the entire path from user
+surface to capability host. A generated adapter that is visible but cannot reach
+its action boundary is incomplete, just as a working backend with no rendered
+entry point is incomplete. Generic transport and semantic integration gates
+make those failures reusable and detectable for future features.
+
+---
+
+## 2026-08-09 - Separate extension registration from evolution authority
+
+**1. What this teaches the system**
+
+A generic loader is safe only when discovery, activation, entry selection, and
+capability grants all come from protected metadata. A new module also needs a
+trusted bootstrap transaction: ordinary evolution cannot be allowed to create
+its own registry authority, but human approval must be able to establish that
+authority without manually repairing ownership rules.
+
+**2. How we implemented it**
+
+Step 7.0c adds typed registration requests to the evolution server. Validation
+materializes the proposed protected descriptor and human-reviewed manifest only
+inside the isolated workspace, verifies the runtime factory through the real
+host loader, and still rejects registry or module-contract file operations.
+Explicit approval installs the manifest and protected registry entry; apply
+then revalidates feature code against the registered owner.
+
+The protected composition root now loads enabled descriptors generically,
+checks registry and manifest agreement, enforces real-path containment, maps
+the closed `personal-storage` capability without feature IDs, freezes the
+injected context, validates JSON boundaries, and isolates feature load
+failures. Existing risk-flag composition remains unchanged until a separately
+reviewed migration is needed.
+
+**3. How it applies elsewhere**
+
+Plugin and agent systems can bootstrap new extensions through a reviewed
+control-plane transaction while keeping ordinary code generation unable to
+grant authority. Running the same loader during isolated validation catches
+descriptor drift and invalid factories before protected registration becomes
+durable.
+
+---
+
+## 2026-08-08 - Define protected authority for generic extensions
+
+**1. What this teaches the system**
+
+Discovery and dependency injection are safe only when an evolvable feature
+cannot make itself loadable or expand its own authority. Feature manifests may
+state what code expects, but a protected registry must independently authorize
+identity, entry points, enablement, and capabilities. Exact agreement detects
+contract drift without treating evolvable metadata as permission.
+
+**2. How we implemented it**
+
+Step 7.0b adds a documentation-only generic extension contract. It defines an
+exact protected registry descriptor, a mirrored feature request, the initial
+`personal-storage` capability vocabulary, a minimal `createExtension` factory,
+strict entry-path containment, registry-only enablement, human-reviewed
+registration, and fail-closed behavior. Runtime discovery, registry tooling,
+dependency metadata correction, and Weekly Goals remain unimplemented.
+
+**3. How it applies elsewhere**
+
+Plugin hosts, automation systems, and agent tool registries should separate
+requested authority from granted authority. A protected allowlist should grant
+the minimum capability set, require declared code to match it, and prevent
+untrusted code from choosing its own loader path or activation state.
+
+---
+
 ## 2026-07-31 - Isolate alarm scheduling from evolvable display logic
 
 **1. What this teaches the system**

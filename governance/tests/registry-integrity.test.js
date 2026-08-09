@@ -5,6 +5,7 @@ import test from "node:test";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const REGISTRY_PATH = join(ROOT, "registry", "modules.json");
+const KNOWN_EXTENSION_CAPABILITIES = new Set(["personal-storage"]);
 
 async function readJson(filePath) {
   return JSON.parse(await readFile(filePath, "utf8"));
@@ -42,6 +43,42 @@ test("registry entries resolve to one canonical local contract", async () => {
       assert.equal(contract.storage_schema, undefined);
     }
 
+    if (entry.extension !== undefined) {
+      assert.equal(entry.role, "feature");
+      assert.equal(entry.evolution_policy, "evolvable");
+      assert.deepEqual(
+        Object.keys(entry.extension).sort(),
+        ["authorized_capabilities", "contract_version", "enabled", "runtime"],
+      );
+      assert.equal(entry.extension.contract_version, "1.0");
+      assert.equal(typeof entry.extension.enabled, "boolean");
+      assert.deepEqual(
+        Object.keys(entry.extension.runtime).sort(),
+        ["entry", "factory_export"],
+      );
+      assert.match(entry.extension.runtime.entry, /^(?!\/)(?!.*(?:^|\/)\.\.?\/)(?!.*\\).+\.js$/);
+      assert.match(entry.extension.runtime.factory_export, /^[A-Za-z_$][A-Za-z0-9_$]*$/);
+      assert.deepEqual(
+        entry.extension.authorized_capabilities,
+        [...entry.extension.authorized_capabilities].sort(),
+      );
+      assert.equal(
+        new Set(entry.extension.authorized_capabilities).size,
+        entry.extension.authorized_capabilities.length,
+      );
+      for (const capability of entry.extension.authorized_capabilities) {
+        assert.ok(KNOWN_EXTENSION_CAPABILITIES.has(capability));
+      }
+
+      assert.equal(contract.extension.contract_version, entry.extension.contract_version);
+      assert.deepEqual(contract.extension.runtime, entry.extension.runtime);
+      assert.deepEqual(
+        contract.extension.requested_capabilities,
+        entry.extension.authorized_capabilities,
+      );
+      assert.equal(contract.extension.enabled, undefined);
+    }
+
     for (const dependency of contract.depends_on ?? []) {
       assert.ok(
         registry.modules[dependency],
@@ -63,4 +100,9 @@ test("the central registry contains no duplicate contract files", async () => {
   const entries = await readdir(legacyContractPath).catch(() => []);
 
   assert.deepEqual(entries, []);
+});
+
+test("app-runtime declares its protected personal-data dependency", async () => {
+  const contract = await readJson(join(ROOT, "app", "module.json"));
+  assert.ok(contract.depends_on.includes("personal-data"));
 });

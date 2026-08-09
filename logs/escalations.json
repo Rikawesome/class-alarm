@@ -67,5 +67,400 @@
         "timestamp": "2026-08-06T22:50:09.278295+00:00"
       }
     ]
+  },
+  {
+    "timestamp": "2026-08-09T03:20:17.407684+00:00",
+    "request_id": "7812a04a-3990-461e-8cac-e1319fb8b12d",
+    "original_request": "I want a way to set and track my weekly goals.  Let me create goals for the week, mark them as completed, and review the goals I currently have.",
+    "reason": "Unfixable failure at gate 'unknown' on attempt 1: Registration paths must be 'evolvable/features/weekly-goals' and 'evolvable/features/weekly-goals/module.json'.",
+    "attempts": 1,
+    "failure_chain": [
+      {
+        "attempt": 1,
+        "attempt_id": "0f422b46-43f2-4354-86bb-6f67fe366b1b",
+        "gate": "unknown",
+        "classification": "UNFIXABLE",
+        "error": "Registration paths must be 'evolvable/features/weekly-goals' and 'evolvable/features/weekly-goals/module.json'.",
+        "steps": {
+          "path_safety": "pass",
+          "registration": "fail",
+          "module_ownership": "pending",
+          "locked_protection": "pending",
+          "dependency_analysis": "pending",
+          "content_wipe_check": "pending",
+          "syntax_check": "pending",
+          "extension_contract": "pending",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-09T03:20:17.071848+00:00"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-08-09T03:38:07.753280+00:00",
+    "request_id": "b1fd486c-ee0d-46cf-899e-553cebb0a760",
+    "original_request": "I want a way to set and track my weekly goals.  Let me create goals for the week, mark them as completed, and review the goals I currently have.",
+    "reason": "Retry limit (3) exhausted. All attempts had FIXABLE failures that could not be resolved.",
+    "attempts": 3,
+    "failure_chain": [
+      {
+        "attempt": 1,
+        "attempt_id": "b16b24e8-af04-418e-b1f0-842ac6a7eb12",
+        "gate": "registration",
+        "classification": "FIXABLE",
+        "error": "Feature manifest extension request is invalid: 1 validation error for FeatureExtensionRequest\n  Input should be a valid dictionary or instance of FeatureExtensionRequest [type=model_type, input_value=None, input_type=NoneType]\n    For further information visit https://errors.pydantic.dev/2.13/v/model_type",
+        "steps": {
+          "path_safety": "pass",
+          "registration": "fail",
+          "module_ownership": "pending",
+          "locked_protection": "pending",
+          "dependency_analysis": "pending",
+          "content_wipe_check": "pending",
+          "syntax_check": "pending",
+          "extension_contract": "pending",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-09T03:37:53.656124+00:00",
+        "generated_files": {
+          "evolvable/features/weekly-goals/index.js": "export function createWeeklyGoals({ storage } = {}) {\n  function getGoals() {\n    if (!storage) return [];\n    return storage.get('goals') || [];\n  }\n\n  function addGoal(title) {\n    if (!storage) return null;\n    const goals = getGoals();\n    const newGoal = { id: 'goal-' + Date.now(), title, completed: false, createdAt: new Date().toISOString() };\n    storage.set('goals', [...goals, newGoal]);\n    return newGoal;\n  }\n\n  function toggleGoal(id) {\n    if (!storage) return;\n    const goals = getGoals();\n    const updated = goals.map(g => g.id === id ? { ...g, completed: !g.completed } : g);\n    storage.set('goals', updated);\n  }\n\n  function deleteGoal(id) {\n    if (!storage) return;\n    const goals = getGoals();\n    const updated = goals.filter(g => g.id !== id);\n    storage.set('goals', updated);\n  }\n\n  return { getGoals, addGoal, toggleGoal, deleteGoal };\n}\n\nconst defaultWeeklyGoals = createWeeklyGoals();\nexport const { getGoals, addGoal, toggleGoal, deleteGoal } = defaultWeeklyGoals;\n",
+          "evolvable/ui/WeeklyGoals.jsx": "import React, { useState, useEffect } from 'react';\nimport { CheckCircle2, Circle, Plus, Trash2, Target } from 'lucide-react';\nimport { getGoals, addGoal, toggleGoal, deleteGoal } from '../features/weekly-goals/index.js';\n\nexport default function WeeklyGoals() {\n  const [goals, setGoals] = useState([]);\n  const [newTitle, setNewTitle] = useState('');\n\n  useEffect(() => {\n    try {\n      setGoals(getGoals());\n    } catch (e) {\n      setGoals([]);\n    }\n  }, []);\n\n  function handleAdd(e) {\n    e.preventDefault();\n    if (!newTitle.trim()) return;\n    const created = addGoal(newTitle.trim());\n    if (created) {\n      setGoals(getGoals());\n      setNewTitle('');\n    }\n  }\n\n  function handleToggle(id) {\n    toggleGoal(id);\n    setGoals(getGoals());\n  }\n\n  function handleDelete(id) {\n    deleteGoal(id);\n    setGoals(getGoals());\n  }\n\n  return (\n    <div className=\"panel\">\n      <div className=\"panel-heading\">\n        <h2>Weekly Goals</h2>\n        <span className=\"count-badge\">{goals.filter(g => g.completed).length} / {goals.length} completed</span>\n      </div>\n      <div style={{ padding: '16px 20px' }}>\n        <form onSubmit={handleAdd} style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>\n          <input\n            type=\"text\"\n            value={newTitle}\n            onChange={e => setNewTitle(e.target.value)}\n            placeholder=\"Add a new goal for this week...\"\n            style={{ flex: 1, padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '13px' }}\n          />\n          <button type=\"submit\" className=\"primary-button small-button\" style={{ width: 'auto' }}>\n            <Plus size={15} /> Add Goal\n          </button>\n        </form>\n        {goals.length === 0 ? (\n          <div className=\"empty-schedule\">No weekly goals set yet. Add one above!</div>\n        ) : (\n          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>\n            {goals.map(goal => (\n              <li key={goal.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: '#fafbfa', border: '1px solid #e5e9e7', borderRadius: '6px' }}>\n                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} onClick={() => handleToggle(goal.id)}>\n                  {goal.completed ? (\n                    <CheckCircle2 size={18} style={{ color: '#28745b' }} />\n                  ) : (\n                    <Circle size={18} style={{ color: '#94a3b8' }} />\n                  )}\n                  <span style={{ textDecoration: goal.completed ? 'line-through' : 'none', color: goal.completed ? '#94a3b8' : '#252c28', fontSize: '13px', fontWeight: '500' }}>\n                    {goal.title}\n                  </span>\n                </div>\n                <button\n                  className=\"icon-button\"\n                  type=\"button\"\n                  onClick={() => handleDelete(goal.id)}\n                  title=\"Delete goal\"\n                >\n                  <Trash2 size={15} />\n                </button>\n              </li>\n            ))}\n          </ul>\n        )}\n      </div>\n    </div>\n  );\n}\n",
+          "evolvable/ui/App.jsx": "import React, { useState, useEffect, useCallback } from 'react';\nimport { BookOpen, Clock, AlarmClock, Zap, Plus, Sun, Moon, Target } from 'lucide-react';\nimport CourseList from './CourseList.jsx';\nimport AddCourseModal from './AddCourseModal.jsx';\nimport ApprovalModal from './ApprovalModal.jsx';\nimport ChatInterface from './ChatInterface.jsx';\nimport WeeklyGoals from './WeeklyGoals.jsx';\n\nfunction LiveClock() {\n  const [time, setTime] = useState(new Date());\n  useEffect(() => {\n    const id = setInterval(() => setTime(new Date()), 1000);\n    return () => clearInterval(id);\n  }, []);\n  return (\n    <div className=\"modern-live-clock\">\n      <div className=\"clock-icon-glow\">\n        <Clock size={16} />\n      </div>\n      <div className=\"clock-time-display\">\n        <span className=\"time-main\">{time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>\n        <span className=\"time-date-sub\">{time.toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>\n      </div>\n    </div>\n  );\n}\n\nexport default function App() {\n  const [courses, setCourses] = useState([]);\n  const [runtime, setRuntime] = useState(null);\n  const [error, setError] = useState('');\n  const [testingCourseId, setTestingCourseId] = useState(null);\n  const [showAddModal, setShowAddModal] = useState(false);\n  const [pendingProposal, setPendingProposal] = useState(null);\n  const [darkMode, setDarkMode] = useState(() => {\n    return localStorage.getItem('class_alarm_theme') === 'dark';\n  });\n\n  useEffect(() => {\n    if (darkMode) {\n      document.documentElement.classList.add('dark-theme');\n      localStorage.setItem('class_alarm_theme', 'dark');\n    } else {\n      document.documentElement.classList.remove('dark-theme');\n      localStorage.setItem('class_alarm_theme', 'light');\n    }\n  }, [darkMode]);\n\n  const applySnapshot = useCallback(({ courses: c, runtime: r }) => {\n    if (c) setCourses(c);\n    if (r) setRuntime(r);\n  }, []);\n\n  useEffect(() => {\n    fetch('/api/bootstrap')\n      .then(r => r.json())\n      .then(applySnapshot)\n      .catch(() => setError('Could not load data from server.'));\n  }, [applySnapshot]);\n\n  useEffect(() => {\n    const es = new EventSource('/api/events');\n    es.addEventListener('alarm', e => {\n      const data = JSON.parse(e.data);\n      setRuntime(prev => prev ? {\n        ...prev,\n        recentNotifications: [data, ...(prev.recentNotifications || [])].slice(0, 20),\n      } : prev);\n    });\n    return () => es.close();\n  }, []);\n\n  async function handleAddCourse(courseData) {\n    const res = await fetch('/api/courses', {\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify(courseData),\n    });\n    const data = await res.json();\n    if (!res.ok) throw new Error(data.error || 'Failed to add course');\n    applySnapshot(data);\n  }\n\n  async function handleDeleteCourse(courseId) {\n    const res = await fetch('/api/courses/' + courseId, { method: 'DELETE' });\n    const data = await res.json();\n    if (!res.ok) { setError(data.error || 'Delete failed'); return; }\n    applySnapshot(data);\n  }\n\n  async function handleToggleRisk(courseId, risky) {\n    const res = await fetch('/api/courses/' + courseId + '/risk', {\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({ is_risky: risky }),\n    });\n    const data = await res.json();\n    if (!res.ok) { setError(data.error || 'Failed to update risk'); return; }\n    applySnapshot(data);\n  }\n\n  async function handleTestAlarm(courseId) {\n    setTestingCourseId(courseId);\n    try {\n      await fetch('/api/alarms/test', {\n        method: 'POST',\n        headers: { 'Content-Type': 'application/json' },\n        body: JSON.stringify({ courseId }),\n      });\n    } finally {\n      setTimeout(() => setTestingCourseId(null), 1800);\n    }\n  }\n\n  const nextAlarm = runtime?.nextAlarm ?? null;\n  const nextAlarmCourseId = nextAlarm?.courseId ?? null;\n  const riskyCourses = courses.filter(c => c.is_risky);\n\n  return (\n    <div className=\"app-shell\">\n      <nav className=\"nav-rail\">\n        <div className=\"brand-lockup\">\n          <div className=\"brand-mark\"><AlarmClock size={20} /></div>\n          <span>\n            <strong>Class Alarm</strong>\n            <small>Project Darwin</small>\n          </span>\n        </div>\n        <div className=\"primary-nav\">\n          <a className=\"nav-item active\" href=\"#\">\n            <BookOpen size={16} /> Schedule\n          </a>\n        </div>\n        <div className=\"core-status\">\n          <Zap size={14} />\n          <span>\n            <strong>Core locked</strong>\n            <small>{runtime?.status ?? 'loading'}</small>\n          </span>\n        </div>\n      </nav>\n\n      <div className=\"app-main\">\n        <header className=\"topbar\">\n          <div>\n            <p className=\"date-label\">{new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</p>\n            <h1>My Schedule & Goals</h1>\n          </div>\n          <div className=\"topbar-actions\">\n            <LiveClock />\n            <button\n              className=\"secondary-button\"\n              onClick={() => setDarkMode(!darkMode)}\n              aria-label=\"Toggle dark mode\"\n              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}\n            >\n              {darkMode ? <Sun size={15} /> : <Moon size={15} />}\n              {darkMode ? 'Light' : 'Dark'}\n            </button>\n            <button className=\"secondary-button\" onClick={() => setShowAddModal(true)}>\n              <Plus size={15} /> Add Course\n            </button>\n          </div>\n        </header>\n\n        <main className=\"workspace\">\n          {error && <div className=\"error-banner\" onClick={() => setError('')}>{error}</div>}\n\n          <div className=\"runtime-strip\">\n            <div className=\"runtime-stat\">\n              <AlarmClock size={18} />\n              <span>\n                <small>Next alarm</small>\n                <strong>{nextAlarm ? nextAlarm.courseName : 'None scheduled'}</strong>\n              </span>\n            </div>\n            <div className=\"runtime-stat\">\n              <BookOpen size={18} />\n              <span>\n                <small>Courses</small>\n                <strong>{courses.length}</strong>\n              </span>\n            </div>\n            <div className=\"runtime-stat\">\n              <Zap size={18} />\n              <span>\n                <small>Risk flagged</small>\n                <strong>{riskyCourses.length}</strong>\n              </span>\n            </div>\n            <div className=\"runtime-stat\">\n              <span className=\"runtime-badge\">\n                <span className=\"status-dot\" />\n                <span>\n                  <small>Runtime</small>\n                  <strong>{runtime?.status ?? 'connecting...'}</strong>\n                </span>\n              </span>\n            </div>\n          </div>\n\n          <div style={{ display: 'grid', gap: '20px', marginBottom: '20px' }}>\n            <WeeklyGoals />\n          </div>\n\n          <div className=\"panel\">\n            <div className=\"panel-heading\">\n              <h2>Timetable</h2>\n              <div className=\"panel-actions\">\n                <span className=\"count-badge\">{courses.length} courses</span>\n                <button className=\"secondary-button small-button\" onClick={() => setShowAddModal(true)}>\n                  <Plus size={13} /> Add\n                </button>\n              </div>\n            </div>\n            <CourseList\n              courses={courses}\n              nextAlarmCourseId={nextAlarmCourseId}\n              testingCourseId={testingCourseId}\n              onTestAlarm={handleTestAlarm}\n              onDeleteCourse={handleDeleteCourse}\n              onToggleRisk={handleToggleRisk}\n            />\n          </div>\n        </main>\n      </div>\n\n      {showAddModal && (\n        <AddCourseModal onAdd={handleAddCourse} onClose={() => setShowAddModal(false)} />\n      )}\n\n      {pendingProposal && (\n        <ApprovalModal\n          proposal={pendingProposal}\n          onApprove={() => setPendingProposal(null)}\n          onDismiss={() => setPendingProposal(null)}\n        />\n      )}\n\n      <ChatInterface onProposal={proposal => {\n        if (proposal.path === 'fast') {\n          setPendingProposal(proposal);\n        } else {\n          setPendingProposal(proposal);\n        }\n      }} />\n    </div>\n  );\n}\n"
+        }
+      },
+      {
+        "attempt": 2,
+        "attempt_id": "9908faa5-0d25-4dc5-b98f-c12a841c27a0",
+        "gate": "registration",
+        "classification": "FIXABLE",
+        "error": "Feature manifest extension request is invalid: 1 validation error for FeatureExtensionRequest\n  Input should be a valid dictionary or instance of FeatureExtensionRequest [type=model_type, input_value=None, input_type=NoneType]\n    For further information visit https://errors.pydantic.dev/2.13/v/model_type",
+        "steps": {
+          "path_safety": "pass",
+          "registration": "fail",
+          "module_ownership": "pending",
+          "locked_protection": "pending",
+          "dependency_analysis": "pending",
+          "content_wipe_check": "pending",
+          "syntax_check": "pending",
+          "extension_contract": "pending",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-09T03:38:04.586797+00:00",
+        "generated_files": {
+          "evolvable/features/weekly-goals/index.js": "export function createWeeklyGoals({ storage } = {}) {\n  function getGoals() {\n    if (!storage) return [];\n    return storage.get('goals') || [];\n  }\n\n  function addGoal(title) {\n    if (!storage) return null;\n    const goals = getGoals();\n    const newGoal = { id: 'goal-' + Date.now(), title, completed: false, createdAt: new Date().toISOString() };\n    storage.set('goals', [...goals, newGoal]);\n    return newGoal;\n  }\n\n  function toggleGoal(id) {\n    if (!storage) return;\n    const goals = getGoals();\n    const updated = goals.map(g => g.id === id ? { ...g, completed: !g.completed } : g);\n    storage.set('goals', updated);\n  }\n\n  function deleteGoal(id) {\n    if (!storage) return;\n    const goals = getGoals();\n    const updated = goals.filter(g => g.id !== id);\n    storage.set('goals', updated);\n  }\n\n  return { getGoals, addGoal, toggleGoal, deleteGoal };\n}\n\nconst defaultWeeklyGoals = createWeeklyGoals();\nexport const { getGoals, addGoal, toggleGoal, deleteGoal } = defaultWeeklyGoals;\n",
+          "evolvable/ui/WeeklyGoals.jsx": "import React, { useState, useEffect } from 'react';\nimport { CheckCircle2, Circle, Plus, Trash2, Target } from 'lucide-react';\nimport { getGoals, addGoal, toggleGoal, deleteGoal } from '../features/weekly-goals/index.js';\n\nexport default function WeeklyGoals() {\n  const [goals, setGoals] = useState([]);\n  const [newTitle, setNewTitle] = useState('');\n\n  useEffect(() => {\n    try {\n      setGoals(getGoals());\n    } catch (e) {\n      setGoals([]);\n    }\n  }, []);\n\n  function handleAdd(e) {\n    e.preventDefault();\n    if (!newTitle.trim()) return;\n    const created = addGoal(newTitle.trim());\n    if (created) {\n      setGoals(getGoals());\n      setNewTitle('');\n    }\n  }\n\n  function handleToggle(id) {\n    toggleGoal(id);\n    setGoals(getGoals());\n  }\n\n  function handleDelete(id) {\n    deleteGoal(id);\n    setGoals(getGoals());\n  }\n\n  return (\n    <div className=\"panel\">\n      <div className=\"panel-heading\">\n        <h2>Weekly Goals</h2>\n        <span className=\"count-badge\">{goals.filter(g => g.completed).length} / {goals.length} completed</span>\n      </div>\n      <div style={{ padding: '16px 20px' }}>\n        <form onSubmit={handleAdd} style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>\n          <input\n            type=\"text\"\n            value={newTitle}\n            onChange={e => setNewTitle(e.target.value)}\n            placeholder=\"Add a new goal for this week...\"\n            style={{ flex: 1, padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '13px' }}\n          />\n          <button type=\"submit\" className=\"primary-button small-button\" style={{ width: 'auto' }}>\n            <Plus size={15} /> Add Goal\n          </button>\n        </form>\n        {goals.length === 0 ? (\n          <div className=\"empty-schedule\">No weekly goals set yet. Add one above!</div>\n        ) : (\n          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>\n            {goals.map(goal => (\n              <li key={goal.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: '#fafbfa', border: '1px solid #e5e9e7', borderRadius: '6px' }}>\n                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} onClick={() => handleToggle(goal.id)}>\n                  {goal.completed ? (\n                    <CheckCircle2 size={18} style={{ color: '#28745b' }} />\n                  ) : (\n                    <Circle size={18} style={{ color: '#94a3b8' }} />\n                  )}\n                  <span style={{ textDecoration: goal.completed ? 'line-through' : 'none', color: goal.completed ? '#94a3b8' : '#252c28', fontSize: '13px', fontWeight: '500' }}>\n                    {goal.title}\n                  </span>\n                </div>\n                <button\n                  className=\"icon-button\"\n                  type=\"button\"\n                  onClick={() => handleDelete(goal.id)}\n                  title=\"Delete goal\"\n                >\n                  <Trash2 size={15} />\n                </button>\n              </li>\n            ))}\n          </ul>\n        )}\n      </div>\n    </div>\n  );\n}\n",
+          "evolvable/ui/App.jsx": "import React, { useState, useEffect, useCallback } from 'react';\nimport { BookOpen, Clock, AlarmClock, Zap, Plus, Sun, Moon, Target } from 'lucide-react';\nimport CourseList from './CourseList.jsx';\nimport AddCourseModal from './AddCourseModal.jsx';\nimport ApprovalModal from './ApprovalModal.jsx';\nimport ChatInterface from './ChatInterface.jsx';\nimport WeeklyGoals from './WeeklyGoals.jsx';\n\nfunction LiveClock() {\n  const [time, setTime] = useState(new Date());\n  useEffect(() => {\n    const id = setInterval(() => setTime(new Date()), 1000);\n    return () => clearInterval(id);\n  }, []);\n  return (\n    <div className=\"modern-live-clock\">\n      <div className=\"clock-icon-glow\">\n        <Clock size={16} />\n      </div>\n      <div className=\"clock-time-display\">\n        <span className=\"time-main\">{time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>\n        <span className=\"time-date-sub\">{time.toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>\n      </div>\n    </div>\n  );\n}\n\nexport default function App() {\n  const [courses, setCourses] = useState([]);\n  const [runtime, setRuntime] = useState(null);\n  const [error, setError] = useState('');\n  const [testingCourseId, setTestingCourseId] = useState(null);\n  const [showAddModal, setShowAddModal] = useState(false);\n  const [pendingProposal, setPendingProposal] = useState(null);\n  const [darkMode, setDarkMode] = useState(() => {\n    return localStorage.getItem('class_alarm_theme') === 'dark';\n  });\n\n  useEffect(() => {\n    if (darkMode) {\n      document.documentElement.classList.add('dark-theme');\n      localStorage.setItem('class_alarm_theme', 'dark');\n    } else {\n      document.documentElement.classList.remove('dark-theme');\n      localStorage.setItem('class_alarm_theme', 'light');\n    }\n  }, [darkMode]);\n\n  const applySnapshot = useCallback(({ courses: c, runtime: r }) => {\n    if (c) setCourses(c);\n    if (r) setRuntime(r);\n  }, []);\n\n  useEffect(() => {\n    fetch('/api/bootstrap')\n      .then(r => r.json())\n      .then(applySnapshot)\n      .catch(() => setError('Could not load data from server.'));\n  }, [applySnapshot]);\n\n  useEffect(() => {\n    const es = new EventSource('/api/events');\n    es.addEventListener('alarm', e => {\n      const data = JSON.parse(e.data);\n      setRuntime(prev => prev ? {\n        ...prev,\n        recentNotifications: [data, ...(prev.recentNotifications || [])].slice(0, 20),\n      } : prev);\n    });\n    return () => es.close();\n  }, []);\n\n  async function handleAddCourse(courseData) {\n    const res = await fetch('/api/courses', {\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify(courseData),\n    });\n    const data = await res.json();\n    if (!res.ok) throw new Error(data.error || 'Failed to add course');\n    applySnapshot(data);\n  }\n\n  async function handleDeleteCourse(courseId) {\n    const res = await fetch('/api/courses/' + courseId, { method: 'DELETE' });\n    const data = await res.json();\n    if (!res.ok) { setError(data.error || 'Delete failed'); return; }\n    applySnapshot(data);\n  }\n\n  async function handleToggleRisk(courseId, risky) {\n    const res = await fetch('/api/courses/' + courseId + '/risk', {\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({ is_risky: risky }),\n    });\n    const data = await res.json();\n    if (!res.ok) { setError(data.error || 'Failed to update risk'); return; }\n    applySnapshot(data);\n  }\n\n  async function handleTestAlarm(courseId) {\n    setTestingCourseId(courseId);\n    try {\n      await fetch('/api/alarms/test', {\n        method: 'POST',\n        headers: { 'Content-Type': 'application/json' },\n        body: JSON.stringify({ courseId }),\n      });\n    } finally {\n      setTimeout(() => setTestingCourseId(null), 1800);\n    }\n  }\n\n  const nextAlarm = runtime?.nextAlarm ?? null;\n  const nextAlarmCourseId = nextAlarm?.courseId ?? null;\n  const riskyCourses = courses.filter(c => c.is_risky);\n\n  return (\n    <div className=\"app-shell\">\n      <nav className=\"nav-rail\">\n        <div className=\"brand-lockup\">\n          <div className=\"brand-mark\"><AlarmClock size={20} /></div>\n          <span>\n            <strong>Class Alarm</strong>\n            <small>Project Darwin</small>\n          </span>\n        </div>\n        <div className=\"primary-nav\">\n          <a className=\"nav-item active\" href=\"#\">\n            <BookOpen size={16} /> Schedule\n          </a>\n        </div>\n        <div className=\"core-status\">\n          <Zap size={14} />\n          <span>\n            <strong>Core locked</strong>\n            <small>{runtime?.status ?? 'loading'}</small>\n          </span>\n        </div>\n      </nav>\n\n      <div className=\"app-main\">\n        <header className=\"topbar\">\n          <div>\n            <p className=\"date-label\">{new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</p>\n            <h1>My Schedule & Goals</h1>\n          </div>\n          <div className=\"topbar-actions\">\n            <LiveClock />\n            <button\n              className=\"secondary-button\"\n              onClick={() => setDarkMode(!darkMode)}\n              aria-label=\"Toggle dark mode\"\n              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}\n            >\n              {darkMode ? <Sun size={15} /> : <Moon size={15} />}\n              {darkMode ? 'Light' : 'Dark'}\n            </button>\n            <button className=\"secondary-button\" onClick={() => setShowAddModal(true)}>\n              <Plus size={15} /> Add Course\n            </button>\n          </div>\n        </header>\n\n        <main className=\"workspace\">\n          {error && <div className=\"error-banner\" onClick={() => setError('')}>{error}</div>}\n\n          <div className=\"runtime-strip\">\n            <div className=\"runtime-stat\">\n              <AlarmClock size={18} />\n              <span>\n                <small>Next alarm</small>\n                <strong>{nextAlarm ? nextAlarm.courseName : 'None scheduled'}</strong>\n              </span>\n            </div>\n            <div className=\"runtime-stat\">\n              <BookOpen size={18} />\n              <span>\n                <small>Courses</small>\n                <strong>{courses.length}</strong>\n              </span>\n            </div>\n            <div className=\"runtime-stat\">\n              <Zap size={18} />\n              <span>\n                <small>Risk flagged</small>\n                <strong>{riskyCourses.length}</strong>\n              </span>\n            </div>\n            <div className=\"runtime-stat\">\n              <span className=\"runtime-badge\">\n                <span className=\"status-dot\" />\n                <span>\n                  <small>Runtime</small>\n                  <strong>{runtime?.status ?? 'connecting...'}</strong>\n                </span>\n              </span>\n            </div>\n          </div>\n\n          <div style={{ display: 'grid', gap: '20px', marginBottom: '20px' }}>\n            <WeeklyGoals />\n          </div>\n\n          <div className=\"panel\">\n            <div className=\"panel-heading\">\n              <h2>Timetable</h2>\n              <div className=\"panel-actions\">\n                <span className=\"count-badge\">{courses.length} courses</span>\n                <button className=\"secondary-button small-button\" onClick={() => setShowAddModal(true)}>\n                  <Plus size={13} /> Add\n                </button>\n              </div>\n            </div>\n            <CourseList\n              courses={courses}\n              nextAlarmCourseId={nextAlarmCourseId}\n              testingCourseId={testingCourseId}\n              onTestAlarm={handleTestAlarm}\n              onDeleteCourse={handleDeleteCourse}\n              onToggleRisk={handleToggleRisk}\n            />\n          </div>\n        </main>\n      </div>\n\n      {showAddModal && (\n        <AddCourseModal onAdd={handleAddCourse} onClose={() => setShowAddModal(false)} />\n      )}\n\n      {pendingProposal && (\n        <ApprovalModal\n          proposal={pendingProposal}\n          onApprove={() => setPendingProposal(null)}\n          onDismiss={() => setPendingProposal(null)}\n        />\n      )}\n\n      <ChatInterface onProposal={proposal => {\n        if (proposal.path === 'fast') {\n          setPendingProposal(proposal);\n        } else {\n          setPendingProposal(proposal);\n        }\n      }} />\n    </div>\n  );\n}\n"
+        }
+      },
+      {
+        "attempt": 3,
+        "attempt_id": "0ee352f9-504a-4c9a-b45b-de444e3a23ba",
+        "gate": "registration",
+        "classification": "FIXABLE",
+        "error": "Feature manifest extension request is invalid: 1 validation error for FeatureExtensionRequest\n  Input should be a valid dictionary or instance of FeatureExtensionRequest [type=model_type, input_value=None, input_type=NoneType]\n    For further information visit https://errors.pydantic.dev/2.13/v/model_type",
+        "steps": {
+          "path_safety": "pass",
+          "registration": "fail",
+          "module_ownership": "pending",
+          "locked_protection": "pending",
+          "dependency_analysis": "pending",
+          "content_wipe_check": "pending",
+          "syntax_check": "pending",
+          "extension_contract": "pending",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-09T03:38:07.736510+00:00"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-08-09T13:26:18.447460+00:00",
+    "request_id": "195a59c4-273c-41c7-b3d0-649153d4f6ff",
+    "original_request": "I want a way to set and track my weekly goals. Let me create goals for the week, mark them as completed, and review the goals I currently have.",
+    "reason": "Retry limit (3) exhausted. All attempts had FIXABLE failures that could not be resolved.",
+    "attempts": 3,
+    "failure_chain": [
+      {
+        "attempt": 1,
+        "attempt_id": "1c62adfa-5d58-4be0-96e8-29f6995a9d03",
+        "gate": "extension_contract",
+        "classification": "FIXABLE",
+        "error": "Extension contract validation failed:\n(node:8804) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\nfile:///C:/Users/USER/AppData/Local/Temp/darwin_validate_g9q7wdbb/[eval1]:1\nimport { loadApprovedExtensions } from './app/extensions.js';const host = await loadApprovedExtensions();const failure = host.getFailures()[\"weekly-goals\"];if (failure) throw new Error(failure);host.getState();const stateFailure = host.getFailures()[\"weekly-goals\"];if (stateFailure) throw new Error(stateFailure);\n                                                                                                                                                                               ^\n\nError: Extension factory returned an invalid runtime interface.\n    at file:///C:/Users/USER/AppData/Local/Temp/darwin_validate_g9q7wdbb/[eval1]:1:176\n\nNode.js v24.14.1\n",
+        "steps": {
+          "path_safety": "pass",
+          "registration": "pass",
+          "module_ownership": "pass",
+          "locked_protection": "pass",
+          "dependency_analysis": "pass",
+          "content_wipe_check": "pass",
+          "syntax_check": "pass",
+          "extension_contract": "fail",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-09T13:26:07.342005+00:00",
+        "generated_files": {
+          "evolvable/features/weekly-goals/index.js": "export function createExtension({ storage } = {}) {\n  function getGoals() {\n    if (!storage) return [];\n    return storage.get('all_goals') || [];\n  }\n\n  function saveGoals(goals) {\n    if (!storage) return;\n    storage.set('all_goals', goals);\n  }\n\n  function addGoal(title) {\n    const goals = getGoals();\n    const newGoal = { id: 'goal_' + Date.now(), title, completed: false };\n    goals.push(newGoal);\n    saveGoals(goals);\n    return newGoal;\n  }\n\n  function toggleGoal(id) {\n    const goals = getGoals();\n    const updated = goals.map(g => g.id === id ? { ...g, completed: !g.completed } : g);\n    saveGoals(updated);\n    return updated;\n  }\n\n  function deleteGoal(id) {\n    const goals = getGoals();\n    const updated = goals.filter(g => g.id !== id);\n    saveGoals(updated);\n    return updated;\n  }\n\n  return { getGoals, addGoal, toggleGoal, deleteGoal };\n}\n\nconst defaultWeeklyGoals = createExtension();\nexport const { getGoals, addGoal, toggleGoal, deleteGoal } = defaultWeeklyGoals;\n"
+        }
+      },
+      {
+        "attempt": 2,
+        "attempt_id": "7ffccc32-393d-4e7e-b72d-f0d43eff6c23",
+        "gate": "extension_contract",
+        "classification": "FIXABLE",
+        "error": "Extension contract validation failed:\n(node:15308) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\nfile:///C:/Users/USER/AppData/Local/Temp/darwin_validate_g9q7wdbb/[eval1]:1\nimport { loadApprovedExtensions } from './app/extensions.js';const host = await loadApprovedExtensions();const failure = host.getFailures()[\"weekly-goals\"];if (failure) throw new Error(failure);host.getState();const stateFailure = host.getFailures()[\"weekly-goals\"];if (stateFailure) throw new Error(stateFailure);\n                                                                                                                                                                               ^\n\nError: Extension factory returned an invalid runtime interface.\n    at file:///C:/Users/USER/AppData/Local/Temp/darwin_validate_g9q7wdbb/[eval1]:1:176\n\nNode.js v24.14.1\n",
+        "steps": {
+          "path_safety": "pass",
+          "registration": "pass",
+          "module_ownership": "pass",
+          "locked_protection": "pass",
+          "dependency_analysis": "pass",
+          "content_wipe_check": "pass",
+          "syntax_check": "pass",
+          "extension_contract": "fail",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-09T13:26:12.121273+00:00",
+        "generated_files": {
+          "evolvable/features/weekly-goals/index.js": "export function createExtension({ storage } = {}) {\n  function getGoals() {\n    if (!storage) return [];\n    return storage.get('all_goals') || [];\n  }\n\n  function saveGoals(goals) {\n    if (!storage) return;\n    storage.set('all_goals', goals);\n  }\n\n  function addGoal(title) {\n    const goals = getGoals();\n    const newGoal = { id: 'goal_' + Date.now(), title, completed: false };\n    goals.push(newGoal);\n    saveGoals(goals);\n    return newGoal;\n  }\n\n  function toggleGoal(id) {\n    const goals = getGoals();\n    const updated = goals.map(g => g.id === id ? { ...g, completed: !g.completed } : g);\n    saveGoals(updated);\n    return updated;\n  }\n\n  function deleteGoal(id) {\n    const goals = getGoals();\n    const updated = goals.filter(g => g.id !== id);\n    saveGoals(updated);\n    return updated;\n  }\n\n  function getState() {\n    return {\n      goals: getGoals()\n    };\n  }\n\n  function setState(state) {\n    if (state && Array.isArray(state.goals)) {\n      saveGoals(state.goals);\n    }\n  }\n\n  return { getState, setState, getGoals, addGoal, toggleGoal, deleteGoal };\n}\n\nconst defaultWeeklyGoals = createExtension();\nexport const { getState, setState, getGoals, addGoal, toggleGoal, deleteGoal } = defaultWeeklyGoals;\n"
+        }
+      },
+      {
+        "attempt": 3,
+        "attempt_id": "c2199542-510c-48ff-a24a-73f55f31e8e8",
+        "gate": "extension_contract",
+        "classification": "FIXABLE",
+        "error": "Extension contract validation failed:\n(node:12996) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\nfile:///C:/Users/USER/AppData/Local/Temp/darwin_validate_g9q7wdbb/[eval1]:1\nimport { loadApprovedExtensions } from './app/extensions.js';const host = await loadApprovedExtensions();const failure = host.getFailures()[\"weekly-goals\"];if (failure) throw new Error(failure);host.getState();const stateFailure = host.getFailures()[\"weekly-goals\"];if (stateFailure) throw new Error(stateFailure);\n                                                                                                                                                                               ^\n\nError: Extension factory returned an invalid runtime interface.\n    at file:///C:/Users/USER/AppData/Local/Temp/darwin_validate_g9q7wdbb/[eval1]:1:176\n\nNode.js v24.14.1\n",
+        "steps": {
+          "path_safety": "pass",
+          "registration": "pass",
+          "module_ownership": "pass",
+          "locked_protection": "pass",
+          "dependency_analysis": "pass",
+          "content_wipe_check": "pass",
+          "syntax_check": "pass",
+          "extension_contract": "fail",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-09T13:26:18.380510+00:00"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-08-09T13:45:09.034431+00:00",
+    "request_id": "f68ecf06-f7b9-479e-8bd2-6b478c6bdded",
+    "original_request": "I want a way to set and track my weekly goals. Let me create goals for the week, mark them as completed, and review the goals I currently have.",
+    "reason": "Retry limit (3) exhausted. All attempts had FIXABLE failures that could not be resolved.",
+    "attempts": 3,
+    "failure_chain": [
+      {
+        "attempt": 1,
+        "attempt_id": "59b99fc3-3df1-496d-a1a4-8839e43c6133",
+        "gate": "extension_contract",
+        "classification": "FIXABLE",
+        "error": "Extension contract validation failed:\n(node:8780) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\nfile:///C:/Users/USER/AppData/Local/Temp/darwin_validate_g9q7wdbb/[eval1]:1\nimport { loadApprovedExtensions } from './app/extensions.js';const host = await loadApprovedExtensions();const failure = host.getFailures()[\"weekly-goals\"];if (failure) throw new Error(failure);host.getState();const stateFailure = host.getFailures()[\"weekly-goals\"];if (stateFailure) throw new Error(stateFailure);\n                                                                                                                                                                               ^\n\nError: Extension factory returned an invalid runtime interface.\n    at file:///C:/Users/USER/AppData/Local/Temp/darwin_validate_g9q7wdbb/[eval1]:1:176\n\nNode.js v24.14.1\n",
+        "steps": {
+          "path_safety": "pass",
+          "registration": "pass",
+          "module_ownership": "pass",
+          "locked_protection": "pass",
+          "dependency_analysis": "pass",
+          "content_wipe_check": "pass",
+          "syntax_check": "pass",
+          "extension_contract": "fail",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-09T13:44:55.761398+00:00",
+        "generated_files": {
+          "evolvable/features/weekly-goals/index.js": "export function createExtension({ storage }) {\n  function getGoals() {\n    if (!storage) return [];\n    const data = storage.get('goals');\n    return Array.isArray(data) ? data : [];\n  }\n\n  function saveGoals(goals) {\n    if (storage) {\n      storage.set('goals', goals);\n    }\n  }\n\n  function addGoal(title) {\n    const goals = getGoals();\n    const newGoal = { id: 'g-' + Date.now(), title, completed: false };\n    saveGoals([...goals, newGoal]);\n    return newGoal;\n  }\n\n  function toggleGoal(id) {\n    const goals = getGoals();\n    const updated = goals.map(g => g.id === id ? { ...g, completed: !g.completed } : g);\n    saveGoals(updated);\n    return updated;\n  }\n\n  function deleteGoal(id) {\n    const goals = getGoals();\n    const updated = goals.filter(g => g.id !== id);\n    saveGoals(updated);\n    return updated;\n  }\n\n  return {\n    getGoals,\n    addGoal,\n    toggleGoal,\n    deleteGoal\n  };\n}\n",
+          "evolvable/ui/WeeklyGoals.jsx": "import React, { useState, useEffect } from 'react';\nimport { CheckSquare, Square, Plus, Trash2 } from 'lucide-react';\n\nexport default function WeeklyGoals({ extension }) {\n  const [goals, setGoals] = useState([]);\n  const [newTitle, setNewTitle] = useState('');\n\n  useEffect(() => {\n    if (extension && extension.getGoals) {\n      setGoals(extension.getGoals());\n    }\n  }, [extension]);\n\n  function handleAdd(e) {\n    e.preventDefault();\n    if (!newTitle.trim() || !extension) return;\n    extension.addGoal(newTitle.trim());\n    setGoals(extension.getGoals());\n    setNewTitle('');\n  }\n\n  function handleToggle(id) {\n    if (!extension) return;\n    extension.toggleGoal(id);\n    setGoals(extension.getGoals());\n  }\n\n  function handleDelete(id) {\n    if (!extension) return;\n    extension.deleteGoal(id);\n    setGoals(extension.getGoals());\n  }\n\n  return (\n    <div className=\"panel\">\n      <div className=\"panel-heading\">\n        <h2>Weekly Goals</h2>\n        <span className=\"count-badge\">{goals.length} goals</span>\n      </div>\n      <div style={{ padding: '16px 20px' }}>\n        <form onSubmit={handleAdd} style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>\n          <input\n            type=\"text\"\n            value={newTitle}\n            onChange={e => setNewTitle(e.target.value)}\n            placeholder=\"Add a new weekly goal...\"\n            style={{ flex: 1, padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '13px' }}\n          />\n          <button type=\"submit\" className=\"primary-button small-button\" style={{ width: 'auto' }}>\n            <Plus size={14} /> Add\n          </button>\n        </form>\n        {goals.length === 0 ? (\n          <div className=\"empty-schedule\">No goals set for this week.</div>\n        ) : (\n          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>\n            {goals.map(g => (\n              <li key={g.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: '#fafbfa', border: '1px solid #e5e9e7', borderRadius: '6px' }}>\n                <div\n                  onClick={() => handleToggle(g.id)}\n                  style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', flex: 1 }}\n                >\n                  {g.completed ? <CheckSquare size={16} color=\"#28745b\" /> : <Square size={16} color=\"#78817c\" />}\n                  <span style={{ textDecoration: g.completed ? 'line-through' : 'none', color: g.completed ? '#78817c' : '#202622', fontSize: '13px' }}>\n                    {g.title}\n                  </span>\n                </div>\n                <button\n                  type=\"button\"\n                  onClick={() => handleDelete(g.id)}\n                  className=\"icon-button\"\n                  style={{ width: '28px', height: '28px' }}\n                >\n                  <Trash2 size={14} />\n                </button>\n              </li>\n            ))}\n          </ul>\n        )}\n      </div>\n    </div>\n  );\n}\n"
+        }
+      },
+      {
+        "attempt": 2,
+        "attempt_id": "b04153e2-0b3f-4b64-950b-041901bb49ad",
+        "gate": "extension_contract",
+        "classification": "FIXABLE",
+        "error": "Extension contract validation failed:\n(node:8540) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\nfile:///C:/Users/USER/AppData/Local/Temp/darwin_validate_g9q7wdbb/[eval1]:1\nimport { loadApprovedExtensions } from './app/extensions.js';const host = await loadApprovedExtensions();const failure = host.getFailures()[\"weekly-goals\"];if (failure) throw new Error(failure);host.getState();const stateFailure = host.getFailures()[\"weekly-goals\"];if (stateFailure) throw new Error(stateFailure);\n                                                                                                                                                                               ^\n\nError: Extension factory returned an invalid runtime interface.\n    at file:///C:/Users/USER/AppData/Local/Temp/darwin_validate_g9q7wdbb/[eval1]:1:176\n\nNode.js v24.14.1\n",
+        "steps": {
+          "path_safety": "pass",
+          "registration": "pass",
+          "module_ownership": "pass",
+          "locked_protection": "pass",
+          "dependency_analysis": "pass",
+          "content_wipe_check": "pass",
+          "syntax_check": "pass",
+          "extension_contract": "fail",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-09T13:45:01.744104+00:00",
+        "generated_files": {
+          "evolvable/features/weekly-goals/index.js": "export function createExtension({ storage }) {\n  function getGoals() {\n    if (!storage) return [];\n    const data = storage.get('goals');\n    return Array.isArray(data) ? data : [];\n  }\n\n  function saveGoals(goals) {\n    if (storage) {\n      storage.set('goals', goals);\n    }\n  }\n\n  function addGoal(title) {\n    const goals = getGoals();\n    const newGoal = { id: 'g-' + Date.now(), title, completed: false };\n    saveGoals([...goals, newGoal]);\n    return newGoal;\n  }\n\n  function toggleGoal(id) {\n    const goals = getGoals();\n    const updated = goals.map(g => g.id === id ? { ...g, completed: !g.completed } : g);\n    saveGoals(updated);\n    return updated;\n  }\n\n  function deleteGoal(id) {\n    const goals = getGoals();\n    const updated = goals.filter(g => g.id !== id);\n    saveGoals(updated);\n    return updated;\n  }\n\n  return {\n    getState: () => ({\n      goals: getGoals(),\n    }),\n    getActions: () => ({\n      addGoal,\n      toggleGoal,\n      deleteGoal,\n    }),\n  };\n}\n"
+        }
+      },
+      {
+        "attempt": 3,
+        "attempt_id": "e7ce27c4-0fc6-43f3-afc6-ff46ba1cb89c",
+        "gate": "extension_contract",
+        "classification": "FIXABLE",
+        "error": "Extension contract validation failed:\n(node:12428) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\nfile:///C:/Users/USER/AppData/Local/Temp/darwin_validate_g9q7wdbb/[eval1]:1\nimport { loadApprovedExtensions } from './app/extensions.js';const host = await loadApprovedExtensions();const failure = host.getFailures()[\"weekly-goals\"];if (failure) throw new Error(failure);host.getState();const stateFailure = host.getFailures()[\"weekly-goals\"];if (stateFailure) throw new Error(stateFailure);\n                                                                                                                                                                               ^\n\nError: Extension factory returned an invalid runtime interface.\n    at file:///C:/Users/USER/AppData/Local/Temp/darwin_validate_g9q7wdbb/[eval1]:1:176\n\nNode.js v24.14.1\n",
+        "steps": {
+          "path_safety": "pass",
+          "registration": "pass",
+          "module_ownership": "pass",
+          "locked_protection": "pass",
+          "dependency_analysis": "pass",
+          "content_wipe_check": "pass",
+          "syntax_check": "pass",
+          "extension_contract": "fail",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-09T13:45:09.023061+00:00"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-08-09T15:12:48.896645+00:00",
+    "request_id": "2fefbb41-cb57-4864-8d29-e84e743cc590",
+    "original_request": "I want a way to set and track my weekly goals. Let me create goals for the week, mark them as completed, and review the goals I currently have",
+    "reason": "Retry limit (3) exhausted. All attempts had FIXABLE failures that could not be resolved.",
+    "attempts": 3,
+    "failure_chain": [
+      {
+        "attempt": 1,
+        "attempt_id": "b0aa9b33-ec81-430a-8c35-103dca9cbb51",
+        "gate": "extension_contract",
+        "classification": "FIXABLE",
+        "error": "Extension contract validation failed:\n(node:9328) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\nfile:///C:/Users/USER/AppData/Local/Temp/darwin_validate_68vrp5ht/[eval1]:1\nimport { loadApprovedExtensions } from './app/extensions.js';const host = await loadApprovedExtensions();const failure = host.getFailures()[\"weekly-goals\"];if (failure) throw new Error(failure);host.getState();const stateFailure = host.getFailures()[\"weekly-goals\"];if (stateFailure) throw new Error(stateFailure);\n                                                                                                                                                                               ^\n\nError: Extension factory returned an invalid runtime interface.\n    at file:///C:/Users/USER/AppData/Local/Temp/darwin_validate_68vrp5ht/[eval1]:1:176\n\nNode.js v24.14.1\n",
+        "steps": {
+          "path_safety": "pass",
+          "registration": "pass",
+          "module_ownership": "pass",
+          "locked_protection": "pass",
+          "dependency_analysis": "pass",
+          "content_wipe_check": "pass",
+          "syntax_check": "pass",
+          "extension_contract": "fail",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-09T15:12:36.463725+00:00",
+        "generated_files": {
+          "evolvable/features/weekly-goals/index.js": "export function createExtension({ storage } = {}) {\n  function getGoals() {\n    if (!storage) return [];\n    return storage.list() || [];\n  }\n\n  function addGoal(title) {\n    if (!storage) return null;\n    const id = 'goal-' + Date.now();\n    const record = { id, title, completed: false };\n    storage.set(id, record);\n    return record;\n  }\n\n  function toggleGoal(id) {\n    if (!storage) return null;\n    const record = storage.get(id);\n    if (!record) return null;\n    const updated = { ...record, completed: !record.completed };\n    storage.set(id, updated);\n    return updated;\n  }\n\n  function deleteGoal(id) {\n    if (!storage) return;\n    storage.delete(id);\n  }\n\n  return {\n    getGoals,\n    addGoal,\n    toggleGoal,\n    deleteGoal\n  };\n}\n"
+        }
+      },
+      {
+        "attempt": 2,
+        "attempt_id": "d3be545f-22f2-4177-a5d9-d9d704152aee",
+        "gate": "extension_contract",
+        "classification": "FIXABLE",
+        "error": "Extension contract validation failed:\n(node:15816) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\nfile:///C:/Users/USER/AppData/Local/Temp/darwin_validate_68vrp5ht/[eval1]:1\nimport { loadApprovedExtensions } from './app/extensions.js';const host = await loadApprovedExtensions();const failure = host.getFailures()[\"weekly-goals\"];if (failure) throw new Error(failure);host.getState();const stateFailure = host.getFailures()[\"weekly-goals\"];if (stateFailure) throw new Error(stateFailure);\n                                                                                                                                                                               ^\n\nError: Extension factory returned an invalid runtime interface.\n    at file:///C:/Users/USER/AppData/Local/Temp/darwin_validate_68vrp5ht/[eval1]:1:176\n\nNode.js v24.14.1\n",
+        "steps": {
+          "path_safety": "pass",
+          "registration": "pass",
+          "module_ownership": "pass",
+          "locked_protection": "pass",
+          "dependency_analysis": "pass",
+          "content_wipe_check": "pass",
+          "syntax_check": "pass",
+          "extension_contract": "fail",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-09T15:12:44.030814+00:00",
+        "generated_files": {
+          "evolvable/features/weekly-goals/index.js": "export function createExtension({ storage } = {}) {\n  function getGoals() {\n    if (!storage) return [];\n    return storage.list() || [];\n  }\n\n  function addGoal(title) {\n    if (!storage) return null;\n    const id = 'goal-' + Date.now();\n    const record = { id, title, completed: false };\n    storage.set(id, record);\n    return record;\n  }\n\n  function toggleGoal(id) {\n    if (!storage) return null;\n    const record = storage.get(id);\n    if (!record) return null;\n    const updated = { ...record, completed: !record.completed };\n    storage.set(id, updated);\n    return updated;\n  }\n\n  function deleteGoal(id) {\n    if (!storage) return;\n    storage.delete(id);\n  }\n\n  function getState() {\n    return {\n      goals: getGoals()\n    };\n  }\n\n  return {\n    getState,\n    getGoals,\n    addGoal,\n    toggleGoal,\n    deleteGoal\n  };\n}\n"
+        }
+      },
+      {
+        "attempt": 3,
+        "attempt_id": "20e77bf9-ab98-4dc9-b207-5331508a4ded",
+        "gate": "extension_contract",
+        "classification": "FIXABLE",
+        "error": "Extension contract validation failed:\n(node:6300) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\nfile:///C:/Users/USER/AppData/Local/Temp/darwin_validate_68vrp5ht/[eval1]:1\nimport { loadApprovedExtensions } from './app/extensions.js';const host = await loadApprovedExtensions();const failure = host.getFailures()[\"weekly-goals\"];if (failure) throw new Error(failure);host.getState();const stateFailure = host.getFailures()[\"weekly-goals\"];if (stateFailure) throw new Error(stateFailure);\n                                                                                                                                                                               ^\n\nError: Extension factory returned an invalid runtime interface.\n    at file:///C:/Users/USER/AppData/Local/Temp/darwin_validate_68vrp5ht/[eval1]:1:176\n\nNode.js v24.14.1\n",
+        "steps": {
+          "path_safety": "pass",
+          "registration": "pass",
+          "module_ownership": "pass",
+          "locked_protection": "pass",
+          "dependency_analysis": "pass",
+          "content_wipe_check": "pass",
+          "syntax_check": "pass",
+          "extension_contract": "fail",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-09T15:12:48.835433+00:00"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-08-09T15:44:17.027645+00:00",
+    "request_id": "2ac24e4f-1df6-4690-b7c6-8ef62a086a10",
+    "original_request": "I want a way to set and track my weekly goals. Let me create goals for the week, mark them as completed, and review the goals I currently have",
+    "reason": "Unfixable failure at gate 'unknown' on attempt 1: UI entry file evolvable/ui/App.jsx does not render feature 'weekly-goals' via 'WeeklyGoals'.",
+    "attempts": 1,
+    "failure_chain": [
+      {
+        "attempt": 1,
+        "attempt_id": "610fe533-3bcb-418f-8f52-3c19a214fa44",
+        "gate": "unknown",
+        "classification": "UNFIXABLE",
+        "error": "UI entry file evolvable/ui/App.jsx does not render feature 'weekly-goals' via 'WeeklyGoals'.",
+        "steps": {
+          "path_safety": "pass",
+          "registration": "pass",
+          "module_ownership": "pending",
+          "locked_protection": "pending",
+          "dependency_analysis": "pending",
+          "content_wipe_check": "pending",
+          "syntax_check": "pending",
+          "extension_contract": "pending",
+          "ui_integration": "fail",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-09T15:44:16.930626+00:00"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-08-09T17:11:15.862909+00:00",
+    "request_id": "dc56ad75-0f6a-4f8a-a5f1-1662bc439355",
+    "original_request": "Modify the alarm scheduler so alarms can be postponed automatically",
+    "reason": "Unfixable failure at gate 'unknown' on attempt 1: Proposal contains no file operations; empty proposals cannot be approved or applied.",
+    "attempts": 1,
+    "failure_chain": [
+      {
+        "attempt": 1,
+        "attempt_id": "efce028f-7f6f-4678-a80d-79b763ed2c64",
+        "gate": "unknown",
+        "classification": "UNFIXABLE",
+        "error": "Proposal contains no file operations; empty proposals cannot be approved or applied.",
+        "steps": {
+          "proposal_integrity": "fail",
+          "path_safety": "pending",
+          "registration": "pending",
+          "module_ownership": "pending",
+          "locked_protection": "pending",
+          "dependency_analysis": "pending",
+          "content_wipe_check": "pending",
+          "syntax_check": "pending",
+          "extension_contract": "pending",
+          "ui_integration": "pending",
+          "test_suite": "pending",
+          "production_build": "pending"
+        },
+        "timestamp": "2026-08-09T17:11:15.852380+00:00"
+      }
+    ]
   }
 ]

@@ -22,6 +22,17 @@ The Python evolution backend is not required to run the baseline application. It
 provides the separate proposal, validation, approval, and application control
 plane when its dependencies and API key are configured.
 
+Approved runtime extensions are exposed through the application host at:
+
+```text
+GET  /api/extensions/<module-id>
+POST /api/extensions/<module-id>
+```
+
+The POST body is `{ "action": "...", "input": { ... } }`. Requests are
+dispatched through the generic extension host; browser code never receives a
+feature instance or protected capability directly.
+
 Architectural lessons from each implementation step are recorded in
 [`docs/learning-log.md`](docs/learning-log.md). Every meaningful change should update
 that log with:
@@ -87,6 +98,16 @@ Anything else is full-path. Both paths create reviewable artifacts under
 `server/pending/`. Fast-path proposals use structural and governance checks;
 code-changing proposals use isolated syntax, build, and test validation.
 Transactional application and rollback are implemented in the evolution server.
+
+Feature proposals also declare `ui_integration`. Validation requires the declared
+UI entry file to be an actual proposal operation and checks that the declared
+feature marker is present in its resulting content. Apply then verifies that live
+files exactly match the approved operations.
+
+The evolution chat presents progress in user-facing language while the engine is
+working—for example, “Checking the protected boundaries…” and “Preparing it for
+your review…”. Technical validation details remain in the proposal record for
+developers without making the normal experience feel like a coding console.
 
 ## The Upgraded Evolution Pipeline (Engineered Workflow)
 

@@ -1,5 +1,3 @@
-
-
 import atexit
 import glob as globmod
 import json
@@ -13,7 +11,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import List, Literal, Optional, Union
 
 from google import genai
@@ -24,7 +22,7 @@ except ImportError:
     OpenAI = None  # type: ignore
     OPENAI_AVAILABLE = False
 from google.genai import types
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
@@ -76,7 +74,14 @@ MAX_RETRY_ATTEMPTS = 3
 #                as full-path and surface to the developer for approval.
 # ---------------------------------------------------------------------------
 
-FIXABLE_GATES = {"syntax_check", "production_build", "test_suite", "content_wipe_check"}
+FIXABLE_GATES = {
+    "registration",
+    "syntax_check",
+    "extension_contract",
+    "production_build",
+    "test_suite",
+    "content_wipe_check",
+}
 UNFIXABLE_GATES = {"path_safety", "locked_protection", "dependency_analysis"}
 
 
@@ -205,6 +210,80 @@ class TestEffects(BaseModel):
     modified_tests: List[str] = Field(default_factory=list)
 
 
+class UIIntegration(BaseModel):
+    entry_file: str = Field(description="UI entry file that renders the feature")
+    feature_id: str = Field(description="Feature identifier, such as weekly-goals")
+    rendered_symbol: str = Field(
+        description="Component or visible marker that must occur in entry_file content"
+    )
+
+
+class ExtensionRuntimeDescriptor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    entry: str
+    factory_export: str
+
+
+class ProtectedExtensionDescriptor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["1.0"]
+    enabled: bool
+    runtime: ExtensionRuntimeDescriptor
+    authorized_capabilities: List[str]
+
+
+class FeatureExtensionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["1.0"]
+    runtime: ExtensionRuntimeDescriptor
+    requested_capabilities: List[str]
+
+
+class RegistrationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    module_id: str
+    path: str
+    contract: str
+    extension: ProtectedExtensionDescriptor
+    manifest: dict
+
+
+class GenerationRegistrationRequest(BaseModel):
+    module_id: str = Field(
+        description="Lowercase kebab-case feature ID, for example weekly-goals."
+    )
+    authorized_capabilities: List[Literal["personal-storage"]] = Field(
+        default_factory=list,
+        description=(
+            "Protected capabilities requested by the feature. Include personal-storage "
+            "whenever the feature persists feature-owned data."
+        ),
+    )
+    manifest_json: str = Field(
+        description=(
+            "Complete feature module.json object serialized as a valid JSON string. "
+            "The manifest MUST contain an \"extension\" key with exactly this shape: "
+            "{\"contract_version\": \"1.0\", \"runtime\": {\"entry\": \"index.js\", "
+            "\"factory_export\": \"createExtension\"}, \"requested_capabilities\": [...]}. "
+            "requested_capabilities must exactly match authorized_capabilities. "
+            "Example for a feature with personal-storage: "
+            "{\"module\": \"weekly-goals\", \"role\": \"feature\", "
+            "\"evolution_policy\": \"evolvable\", "
+            "\"owns\": [\"evolvable/features/weekly-goals/**\"], "
+            "\"file_policies\": {\"module.json\": \"human-review\", \"index.js\": \"evolvable\"}, "
+            "\"storage_namespace\": \"weekly-goals\", "
+            "\"storage_schema\": {\"version\": 1, \"record\": {\"title\": \"string\", \"completed\": \"boolean\"}}, "
+            "\"extension\": {\"contract_version\": \"1.0\", "
+            "\"runtime\": {\"entry\": \"index.js\", \"factory_export\": \"createExtension\"}, "
+            "\"requested_capabilities\": [\"personal-storage\"]}}"
+        )
+    )
+
+
 class ProposalOutput(BaseModel):
     plan: str = Field(description="Clear step-by-step description of proposed change")
     files_touched: List[str] = Field(description="All file paths relative to repository root")
@@ -217,6 +296,20 @@ class ProposalOutput(BaseModel):
         description="Imports the model could not confirm as safe (non-relative/aliased). "
                     "Populated by validation, not the model.",
     )
+    ui_integration: Optional[UIIntegration] = None
+    registration_request: Optional[RegistrationRequest] = None
+
+
+class GenerationProposalOutput(BaseModel):
+    plan: str = Field(description="Clear step-by-step description of proposed change")
+    files_touched: List[str] = Field(description="All file paths relative to repository root")
+    operations: List[FileOperation] = Field(description="Explicit operations to execute")
+    contract_effects: ContractEffects = Field(default_factory=ContractEffects)
+    test_effects: TestEffects = Field(default_factory=TestEffects)
+    new_locked_imports: List[str] = Field(default_factory=list)
+    unresolved_imports: List[str] = Field(default_factory=list)
+    ui_integration: Optional[UIIntegration] = None
+    registration_request: Optional[GenerationRegistrationRequest] = None
 
 
 class EvolutionRequest(BaseModel):
@@ -287,6 +380,200 @@ def load_registry_modules() -> dict:
     return registry.get("modules", {})
 
 
+KNOWN_EXTENSION_CAPABILITIES = {"personal-storage"}
+MODULE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+JAVASCRIPT_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
+STORAGE_NAMESPACE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+
+
+def validate_extension_entry_path(entry_path: str) -> PurePosixPath:
+    if (
+        not entry_path
+        or "\\" in entry_path
+        or "\x00" in entry_path
+        or re.match(r"^[A-Za-z]:", entry_path)
+        or "://" in entry_path
+    ):
+        raise ValueError("Extension runtime entry must be a non-empty relative POSIX path.")
+    relative = PurePosixPath(entry_path)
+    if (
+        relative.is_absolute()
+        or any(part in {"", ".", ".."} for part in entry_path.split("/"))
+    ):
+        raise ValueError("Extension runtime entry contains a forbidden path segment.")
+    if relative.suffix != ".js":
+        raise ValueError("Extension runtime entry must resolve to a .js file.")
+    return relative
+
+
+def _validate_capability_list(capabilities: List[str], field_name: str):
+    if capabilities != sorted(capabilities) or len(capabilities) != len(set(capabilities)):
+        raise ValueError(f"{field_name} must contain unique capability names in lexical order.")
+    unknown = set(capabilities) - KNOWN_EXTENSION_CAPABILITIES
+    if unknown:
+        raise ValueError(f"{field_name} contains unknown capabilities: {sorted(unknown)}.")
+
+
+def _manifest_policy_covers_entry(manifest: dict, entry_path: str) -> bool:
+    for pattern in manifest.get("file_policies", {}):
+        if PurePosixPath(entry_path).match(pattern):
+            return True
+    return False
+
+
+def validate_registration_request(
+    registration: RegistrationRequest,
+    modules: dict,
+) -> tuple[dict, bool]:
+    module_id = registration.module_id
+    if not MODULE_ID_PATTERN.fullmatch(module_id):
+        raise ValueError("Registration module_id must use lowercase letters, numbers, and hyphens.")
+
+    expected_path = f"evolvable/features/{module_id}"
+    expected_contract = f"{expected_path}/module.json"
+    if registration.path != expected_path or registration.contract != expected_contract:
+        raise ValueError(
+            f"Registration paths must be '{expected_path}' and '{expected_contract}'."
+        )
+
+    descriptor = registration.extension
+    entry_path = validate_extension_entry_path(descriptor.runtime.entry)
+    if not JAVASCRIPT_IDENTIFIER_PATTERN.fullmatch(descriptor.runtime.factory_export):
+        raise ValueError("Extension factory_export must be a valid JavaScript identifier.")
+    _validate_capability_list(
+        descriptor.authorized_capabilities,
+        "authorized_capabilities",
+    )
+
+    manifest = registration.manifest
+    if manifest.get("module") != module_id:
+        raise ValueError("Feature manifest module must match the registration module_id.")
+    if manifest.get("role") != "feature" or manifest.get("evolution_policy") != "evolvable":
+        raise ValueError("Registered extensions must be evolvable feature modules.")
+    if manifest.get("file_policies", {}).get("module.json") != "human-review":
+        raise ValueError("Feature manifests must keep module.json human-reviewed.")
+    if f"{expected_path}/**" not in manifest.get("owns", []):
+        raise ValueError("Feature manifest owns must include its complete registered module path.")
+    if not _manifest_policy_covers_entry(manifest, entry_path.as_posix()):
+        raise ValueError("Feature manifest file_policies must cover the runtime entry.")
+
+    try:
+        feature_request = FeatureExtensionRequest.model_validate(manifest.get("extension"))
+    except Exception as error:
+        raise ValueError(f"Feature manifest extension request is invalid: {error}") from error
+    if feature_request.contract_version != descriptor.contract_version:
+        raise ValueError("Registry and manifest extension contract versions must match.")
+    if feature_request.runtime != descriptor.runtime:
+        raise ValueError("Registry and manifest runtime descriptors must match.")
+    _validate_capability_list(
+        feature_request.requested_capabilities,
+        "requested_capabilities",
+    )
+    if feature_request.requested_capabilities != descriptor.authorized_capabilities:
+        raise ValueError("Requested and authorized capability sets must match exactly.")
+
+    storage_namespace = manifest.get("storage_namespace")
+    storage_schema = manifest.get("storage_schema")
+    if "personal-storage" in descriptor.authorized_capabilities:
+        if not isinstance(storage_namespace, str) or not STORAGE_NAMESPACE_PATTERN.fullmatch(storage_namespace):
+            raise ValueError("personal-storage requires a valid storage_namespace.")
+        if not isinstance(storage_schema, dict) or not isinstance(storage_schema.get("version"), int):
+            raise ValueError("personal-storage requires a versioned storage_schema.")
+        if not isinstance(storage_schema.get("record"), dict):
+            raise ValueError("personal-storage requires a storage_schema record definition.")
+
+    candidate_entry = {
+        "path": registration.path,
+        "contract": registration.contract,
+        "role": "feature",
+        "evolution_policy": "evolvable",
+        "extension": descriptor.model_dump(),
+    }
+    if storage_namespace is not None or storage_schema is not None:
+        if storage_namespace is None or storage_schema is None:
+            raise ValueError("storage_namespace and storage_schema must be declared together.")
+        candidate_entry["storage_namespace"] = storage_namespace
+        candidate_entry["storage_schema"] = storage_schema
+
+    existing = modules.get(module_id)
+    if existing is not None:
+        if existing != candidate_entry:
+            raise ValueError(f"Module '{module_id}' is already registered differently.")
+        contract_path = ROOT / registration.contract
+        if not contract_path.exists():
+            raise ValueError(f"Registered contract is missing: {registration.contract}.")
+        existing_manifest = json.loads(contract_path.read_text(encoding="utf-8"))
+        if existing_manifest != manifest:
+            raise ValueError(f"Registered contract differs from the requested manifest for '{module_id}'.")
+        return candidate_entry, True
+
+    for existing_id, existing_entry in modules.items():
+        existing_path = PurePosixPath(existing_entry["path"]).as_posix().rstrip("/")
+        candidate_path = PurePosixPath(registration.path).as_posix().rstrip("/")
+        if (
+            candidate_path == existing_path
+            or candidate_path.startswith(f"{existing_path}/")
+            or existing_path.startswith(f"{candidate_path}/")
+        ):
+            raise ValueError(
+                f"Registration path collides with module '{existing_id}'."
+            )
+        if existing_entry.get("storage_namespace") == storage_namespace and storage_namespace is not None:
+            raise ValueError(
+                f"Storage namespace '{storage_namespace}' is already registered."
+            )
+
+    return candidate_entry, False
+
+
+def write_registration(root: Path, registration: RegistrationRequest, candidate_entry: dict):
+    registry_path = root / "registry" / "modules.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["modules"][registration.module_id] = candidate_entry
+    contract_path = root / registration.contract
+    contract_path.parent.mkdir(parents=True, exist_ok=True)
+    contract_path.write_text(
+        json.dumps(registration.manifest, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+
+
+def install_approved_registration(registration: RegistrationRequest) -> bool:
+    registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    candidate_entry, already_registered = validate_registration_request(
+        registration,
+        registry.get("modules", {}),
+    )
+    if already_registered:
+        return False
+
+    contract_path = (ROOT / registration.contract).resolve()
+    contract_path.relative_to(ROOT)
+    if contract_path.exists():
+        raise ValueError(f"Registration contract already exists: {registration.contract}.")
+
+    contract_path.parent.mkdir(parents=True, exist_ok=True)
+    contract_temp = contract_path.with_name(f".{contract_path.name}.{uuid.uuid4().hex}.tmp")
+    registry_temp = REGISTRY_PATH.with_name(f".{REGISTRY_PATH.name}.{uuid.uuid4().hex}.tmp")
+    contract_temp.write_text(
+        json.dumps(registration.manifest, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    registry["modules"][registration.module_id] = candidate_entry
+    registry_temp.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+
+    try:
+        os.replace(contract_temp, contract_path)
+        os.replace(registry_temp, REGISTRY_PATH)
+    except Exception:
+        contract_temp.unlink(missing_ok=True)
+        registry_temp.unlink(missing_ok=True)
+        contract_path.unlink(missing_ok=True)
+        raise
+    return True
+
+
 def build_evolution_context(intent: str) -> str:
     try:
         contracts = load_all_contracts()
@@ -326,6 +613,13 @@ Architecture: Modular Evolvable Architecture (Locked Core vs Evolvable Periphery
    you need is not shown (listed under OVERSIZED FILES), do not propose
    modifying it â€” flag that it needs manual handling instead.
 
+4. A new feature module must use registration_request. Do not include
+   registry/modules.json or the new module.json in file operations; trusted
+   governance writes those only after explicit human approval.
+5. For a new feature, module_id is lowercase kebab-case. The host derives
+   evolvable/features/<module-id>, module.json, runtime entry index.js, and
+   factory export createExtension. Persistent features request personal-storage.
+
 === FULL CURRENT CONTENT OF EVOLVABLE FILES ===
 {json.dumps(app_files_summary, indent=2)}
 
@@ -358,6 +652,41 @@ so do not attempt to work around them):
    Only propose modifying files you were shown in full â€” never a file
    listed as oversized.
 
+6. A new feature module must include registration_request. Never propose a
+   registry/ operation or a module.json operation for that new module; trusted
+   governance creates both only after explicit human approval.
+7. registration_request.manifest_json must contain the complete feature
+   module.json object serialized as a valid JSON string. The manifest MUST
+   contain an "extension" key. The "extension" value must be an object
+   with exactly these fields:
+     {{"contract_version": "1.0", "runtime": {{"entry": "index.js",
+       "factory_export": "createExtension"}},
+       "requested_capabilities": [... same as authorized_capabilities ...]}}
+   A complete valid manifest_json for a personal-storage feature looks like:
+   {{"module": "weekly-goals", "role": "feature",
+     "evolution_policy": "evolvable",
+     "owns": ["evolvable/features/weekly-goals/**"],
+     "file_policies": {{"module.json": "human-review", "index.js": "evolvable"}},
+     "storage_namespace": "weekly-goals",
+     "storage_schema": {{"version": 1, "record": {{"title": "string", "completed": "boolean"}}}},
+     "extension": {{"contract_version": "1.0",
+       "runtime": {{"entry": "index.js", "factory_export": "createExtension"}},
+       "requested_capabilities": ["personal-storage"]}}}}
+8. If the feature persists feature-owned data, authorized_capabilities must be
+   ["personal-storage"] and the manifest must declare matching storage metadata.
+
+9. A registered extension factory is called as:
+   createExtension({{ moduleId, capabilities: {{ personalStorage }} }}).
+   It MUST return exactly the generic runtime interface expected by the host:
+   {{ getState() -> JSON-compatible state, execute(action, input) -> JSON-compatible output }}.
+   Do not return feature-specific methods as the host interface. Dispatch feature
+   actions inside execute(), and use capabilities.personalStorage for persistence.
+
+10. If the request adds a user-visible feature, include ui_integration with the
+    exact UI entry_file, feature_id, and rendered_symbol. The UI operation must
+    import/render that symbol in the entry_file; do not claim UI integration in
+    files_touched without changing the actual entry file content.
+
 Respond only with the requested JSON schema."""
 
 
@@ -383,7 +712,8 @@ def get_owning_module(file_path: str, modules: dict) -> Optional[str]:
     posix_path = Path(file_path).as_posix()
     sorted_modules = sorted(modules.items(), key=lambda x: len(x[1]["path"]), reverse=True)
     for mod_id, entry in sorted_modules:
-        if posix_path.startswith(entry["path"]):
+        module_path = Path(entry["path"]).as_posix().rstrip("/")
+        if posix_path == module_path or posix_path.startswith(f"{module_path}/"):
             return mod_id
     return None
 
@@ -473,7 +803,16 @@ def expand_globs(patterns: List[str], base: Optional[Path] = None) -> List[str]:
 # (for full-path) a human has approved it.
 # ---------------------------------------------------------------------------
 
-IGNORE_DIRS_FOR_COPY = {"node_modules", ".git", "dist", "build", ".vite"}
+IGNORE_DIRS_FOR_COPY = {
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    ".vite",
+    "venv",
+    "__pycache__",
+    "pending",
+}
 
 
 def link_or_fail_node_modules(tmp_root: Path):
@@ -529,7 +868,7 @@ _VALIDATION_LOCK = threading.Lock()
 def _source_files() -> dict:
     files = {}
     for item in ROOT.iterdir():
-        if item.name in IGNORE_DIRS_FOR_COPY or item.name.startswith(".") or item.name == "server":
+        if item.name in IGNORE_DIRS_FOR_COPY or item.name.startswith("."):
             continue
         candidates = [item] if item.is_file() else [p for p in item.rglob("*") if p.is_file()]
         for source in candidates:
@@ -596,6 +935,9 @@ def is_fast_path(proposal: ProposalOutput) -> bool:
     decides fast vs full â€” every entry point must call this, no exceptions,
     no hardcoded overrides.
     """
+    if proposal.registration_request is not None:
+        return False
+
     all_paths = set(proposal.files_touched) | {op.path for op in proposal.operations}
 
     for p in all_paths:
@@ -651,12 +993,16 @@ def check_for_content_wipe(op: FileOperation) -> Optional[str]:
 def validate_proposal(request_id: str) -> dict:
     proposal_file = PENDING_DIR / f"{request_id}.json"
     steps = {
+        "proposal_integrity": "pending",
         "path_safety": "pending",
+        "registration": "pending",
         "module_ownership": "pending",
         "locked_protection": "pending",
         "dependency_analysis": "pending",
         "content_wipe_check": "pending",
         "syntax_check": "pending",
+        "extension_contract": "pending",
+        "ui_integration": "pending",
         "test_suite": "pending",
         "production_build": "pending",
     }
@@ -677,6 +1023,17 @@ def validate_proposal(request_id: str) -> dict:
     except Exception as e:
         return fail([f"Failed to load/parse proposal: {e}"])
 
+    if (
+        not proposal.files_touched
+        and not proposal.operations
+        and proposal.registration_request is None
+    ):
+        steps["proposal_integrity"] = "fail"
+        return fail([
+            "Proposal contains no file operations; empty proposals cannot be approved or applied."
+        ])
+    steps["proposal_integrity"] = "pass"
+
     try:
         validate_file_paths(proposal)
     except ValueError as e:
@@ -692,9 +1049,85 @@ def validate_proposal(request_id: str) -> dict:
     errors = []
     ownership_ok = True
     locked_protected = True
+    registration_entry = None
+
+    if proposal.registration_request is not None:
+        try:
+            registration_entry, _ = validate_registration_request(
+                proposal.registration_request,
+                modules,
+            )
+            runtime_path = (
+                f"{proposal.registration_request.path}/"
+                f"{proposal.registration_request.extension.runtime.entry}"
+            )
+            runtime_operations = [
+                operation
+                for operation in proposal.operations
+                if operation.path == runtime_path
+                and operation.action in {"create", "modify"}
+            ]
+            if len(runtime_operations) != 1:
+                raise ValueError(
+                    f"Registration proposal must create exactly one runtime entry: {runtime_path}."
+                )
+            modules = {
+                **modules,
+                proposal.registration_request.module_id: registration_entry,
+            }
+            steps["registration"] = "pass"
+        except ValueError as error:
+            steps["registration"] = "fail"
+            return fail([str(error)])
+    else:
+        steps["registration"] = "skipped"
+        steps["extension_contract"] = "skipped"
+
+    if proposal.registration_request is not None:
+        integration = proposal.ui_integration
+        if integration is None:
+            steps["ui_integration"] = "fail"
+            return fail([
+                "Feature proposals must declare ui_integration with entry_file, "
+                "feature_id, and rendered_symbol."
+            ])
+        ui_operations = [
+            operation for operation in proposal.operations
+            if operation.path == integration.entry_file
+            and operation.action in {"create", "modify"}
+        ]
+        if len(ui_operations) != 1:
+            steps["ui_integration"] = "fail"
+            return fail([
+                f"UI integration must modify exactly one entry file: {integration.entry_file}."
+            ])
+        ui_content = ui_operations[0].content or ""
+        # The UI entry commonly references the component symbol (for example
+        # WeeklyGoals) without repeating the registry's kebab-case feature ID.
+        # The symbol is the authoritative render proof; the feature ID remains
+        # proposal metadata and is still required by the contract.
+        if integration.rendered_symbol not in ui_content:
+            steps["ui_integration"] = "fail"
+            return fail([
+                f"UI entry file {integration.entry_file} does not render "
+                f"feature '{integration.feature_id}' via '{integration.rendered_symbol}'."
+            ])
+        steps["ui_integration"] = "pass"
+    else:
+        steps["ui_integration"] = "skipped"
 
     all_paths = {op.path for op in proposal.operations} | set(proposal.files_touched)
     for p in all_paths:
+        if (
+            proposal.registration_request is not None
+            and p == proposal.registration_request.contract
+        ):
+            errors.append(
+                "The trusted registration transaction owns the new module.json; "
+                "proposal operations must not create or modify it."
+            )
+            locked_protected = False
+            continue
         # FIX #2: hardcoded check runs FIRST and independently of registry state.
         if is_protected_path(p):
             errors.append(f"Protected path touched: {p} (matches a hardcoded protected prefix).")
@@ -736,6 +1169,14 @@ def validate_proposal(request_id: str) -> dict:
                     if not resolved.startswith("locked/core-data/access.js"):
                         errors.append(f"Boundary violation: {op.path} imports {resolved} directly (must use access.js).")
                         dep_ok = False
+                if (
+                    op.path.startswith("evolvable/")
+                    and resolved.startswith(("app/", "server/", "governance/", "registry/"))
+                ):
+                    errors.append(
+                        f"Boundary violation: {op.path} imports protected host path {resolved}."
+                    )
+                    dep_ok = False
                 if op.path.startswith("locked/") and resolved.startswith("evolvable/"):
                     errors.append(f"Boundary violation: locked file {op.path} imports evolvable path {resolved}.")
                     dep_ok = False
@@ -775,6 +1216,21 @@ def validate_proposal(request_id: str) -> dict:
     timings_ms["workspace_copy"] = round((time.monotonic() - _t0) * 1000)
 
     try:
+        if proposal.registration_request is not None:
+            registration_paths = [
+                "registry/modules.json",
+                proposal.registration_request.contract,
+            ]
+            for relative in registration_paths:
+                path = workspace / relative
+                if relative not in workspace_backups:
+                    workspace_backups[relative] = path.read_bytes() if path.exists() else None
+            write_registration(
+                workspace,
+                proposal.registration_request,
+                registration_entry,
+            )
+
         for op in proposal.operations:
             path = (workspace / op.path).resolve()
             path.relative_to(workspace)  # guard against a path escaping the sandbox
@@ -801,6 +1257,28 @@ def validate_proposal(request_id: str) -> dict:
         if not syntax_ok:
             return fail(errors)
 
+        if proposal.registration_request is not None:
+            _t0 = time.monotonic()
+            validation_script = (
+                "import { loadApprovedExtensions } from './app/extensions.js';"
+                "const host = await loadApprovedExtensions();"
+                f"const failure = host.getFailures()[{json.dumps(proposal.registration_request.module_id)}];"
+                "if (failure) throw new Error(failure);"
+                "host.getState();"
+                f"const stateFailure = host.getFailures()[{json.dumps(proposal.registration_request.module_id)}];"
+                "if (stateFailure) throw new Error(stateFailure);"
+            )
+            ret, out, err = run_command(
+                ["node", "--input-type=module", "--eval", validation_script],
+                cwd=workspace,
+            )
+            timings_ms["extension_contract"] = round((time.monotonic() - _t0) * 1000)
+            if ret != 0:
+                errors.append(f"Extension contract validation failed:\n{err or out}")
+                steps["extension_contract"] = "fail"
+                return fail(errors)
+            steps["extension_contract"] = "pass"
+
         _t0 = time.monotonic()
         ret, out, err = run_command(
             [npm_cmd(), "run", "build"], cwd=workspace,
@@ -819,7 +1297,9 @@ def validate_proposal(request_id: str) -> dict:
             "tests/*.test.js",
             "locked/*/tests/*.test.js",
             "evolvable/*/tests/*.test.js",
+            "evolvable/features/*/tests/*.test.js",
             "app/tests/*.test.js",
+            "governance/tests/*.test.js",
         ], base=workspace)
         if not test_files:
             errors.append(
@@ -860,6 +1340,20 @@ def validate_proposal(request_id: str) -> dict:
         _VALIDATION_LOCK.release()
 
     return {"valid": True, "errors": [], "steps": steps, "timings_ms": timings_ms}
+
+
+def verify_applied_operations(proposal: ProposalOutput) -> None:
+    """Confirm the live files exactly match the approved operations."""
+    for operation in proposal.operations:
+        path = (ROOT / operation.path).resolve()
+        path.relative_to(ROOT)
+        if operation.action in {"create", "modify"}:
+            if not path.exists() or path.read_text(encoding="utf-8") != (operation.content or ""):
+                raise RuntimeError(
+                    f"Applied content differs from the approved operation for {operation.path}."
+                )
+        elif operation.action == "delete" and path.exists():
+            raise RuntimeError(f"Approved deletion did not complete for {operation.path}.")
 
 
 def apply_proposal(request_id: str, human_approved: bool = False) -> dict:
@@ -914,6 +1408,8 @@ def apply_proposal(request_id: str, human_approved: bool = False) -> dict:
                 if ret != 0:
                     raise RuntimeError(f"Syntax error in {op.path}:\n{err or out}")
 
+        verify_applied_operations(proposal)
+
         ret, out, err = (0, "", "") if actual_path_type == "fast" else run_command(
             [npm_cmd(), "run", "build"],
             env_overrides={"DARWIN_VITE_CACHE_DIR": str(VITE_CACHE_DIR)},
@@ -925,7 +1421,9 @@ def apply_proposal(request_id: str, human_approved: bool = False) -> dict:
             "tests/*.test.js",
             "locked/*/tests/*.test.js",
             "evolvable/*/tests/*.test.js",
+            "evolvable/features/*/tests/*.test.js",
             "app/tests/*.test.js",
+            "governance/tests/*.test.js",
         ])
         if actual_path_type != "fast" and not test_files:
             raise RuntimeError("No test files found â€” refusing to apply without a real test run.")
@@ -1000,6 +1498,74 @@ async def get_proposal(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+def parse_generated_proposal(payload: dict) -> ProposalOutput:
+    generated = GenerationProposalOutput.model_validate(payload)
+    proposal_data = generated.model_dump()
+    registration = proposal_data.get("registration_request")
+    if registration is not None:
+        manifest_json = registration.pop("manifest_json")
+        try:
+            registration["manifest"] = json.loads(manifest_json)
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                f"Generated registration manifest_json is invalid JSON: {error}"
+            ) from error
+        module_id = registration["module_id"]
+        module_path = f"evolvable/features/{module_id}"
+        contract_path = f"{module_path}/module.json"
+        runtime = {
+            "entry": "index.js",
+            "factory_export": "createExtension",
+        }
+        registration["path"] = module_path
+        registration["contract"] = contract_path
+        registration["extension"] = {
+            "contract_version": "1.0",
+            "enabled": True,
+            "runtime": runtime,
+            "authorized_capabilities": registration.pop("authorized_capabilities"),
+        }
+
+        # GenerationRegistrationRequest carries the manifest as an opaque JSON
+        # string.  Some model outputs serialize the required manifest extension
+        # as null, even though the registration contract supplies the canonical
+        # runtime and capability values.  Normalize only that absent value; a
+        # non-null manifest extension remains subject to strict validation below.
+        if registration["manifest"].get("extension") is None:
+            descriptor = registration["extension"]
+            registration["manifest"]["extension"] = {
+                "contract_version": descriptor["contract_version"],
+                "runtime": descriptor["runtime"],
+                "requested_capabilities": descriptor["authorized_capabilities"],
+            }
+
+        retained_operations = []
+        for operation in proposal_data["operations"]:
+            if operation["path"] != contract_path:
+                retained_operations.append(operation)
+                continue
+            if operation["action"] not in {"create", "modify"}:
+                raise ValueError(
+                    "Generated registration module.json operation must create or modify "
+                    "the same manifest supplied in manifest_json."
+                )
+            try:
+                operation_manifest = json.loads(operation.get("content") or "")
+            except json.JSONDecodeError as error:
+                raise ValueError(
+                    "Generated registration module.json operation contains invalid JSON."
+                ) from error
+            if operation_manifest != registration["manifest"]:
+                raise ValueError(
+                    "Generated registration module.json operation differs from manifest_json."
+                )
+        proposal_data["operations"] = retained_operations
+        proposal_data["files_touched"] = [
+            path for path in proposal_data["files_touched"] if path != contract_path
+        ]
+    return ProposalOutput.model_validate(proposal_data)
+
+
 def _generate_proposal(client, model_name: str, system_prompt: str, context: str) -> tuple:
     """
     Single Gemini call â†’ validated ProposalOutput.
@@ -1015,12 +1581,12 @@ def _generate_proposal(client, model_name: str, system_prompt: str, context: str
         config=types.GenerateContentConfig(
             system_instruction=system_prompt,
             response_mime_type="application/json",
-            response_schema=ProposalOutput,
+            response_schema=GenerationProposalOutput,
             temperature=0.1,
         ),
     )
     generation_ms = round((time.monotonic() - _t0) * 1000)
-    proposal = ProposalOutput.model_validate(json.loads(response.text))
+    proposal = parse_generated_proposal(json.loads(response.text))
     validate_file_paths(proposal)
 
     unresolved = []
@@ -1334,14 +1900,41 @@ async def approve_proposal_endpoint(request: Request):
     if not proposal_file.exists():
         return JSONResponse({"error": "Proposal not found"}, status_code=404)
     data = json.loads(proposal_file.read_text(encoding="utf-8"))
+    proposal = ProposalOutput.model_validate(data.get("proposal", {}))
+    registration_created = False
+    if proposal.registration_request is not None:
+        validation = validate_proposal(request_id)
+        if not validation.get("valid"):
+            return JSONResponse(
+                {
+                    "error": "Registration proposals must pass validation before approval.",
+                    "validation": validation,
+                },
+                status_code=422,
+            )
+        try:
+            registration_created = install_approved_registration(
+                proposal.registration_request
+            )
+        except (ValueError, json.JSONDecodeError) as error:
+            return JSONResponse({"error": str(error)}, status_code=400)
     data["meta"]["human_approved"] = True
     data["meta"]["status"] = "approved"
+    if proposal.registration_request is not None:
+        data["meta"]["registration_approved"] = True
     proposal_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
     append_log({
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "request_id": request_id, "action": "approve", "status": "approved",
+        "request_id": request_id,
+        "action": "approve",
+        "status": "approved",
+        "registration_created": registration_created,
     })
-    return JSONResponse({"id": request_id, "status": "approved"})
+    return JSONResponse({
+        "id": request_id,
+        "status": "approved",
+        "registration_created": registration_created,
+    })
 
 
 async def apply_proposal_endpoint(request: Request):
