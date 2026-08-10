@@ -77,7 +77,10 @@ export default function ChatInterface({ onProposal }) {
             text: data.plan,
             id: data.id,
             path: data.path,
-            files: data.files_touched,
+            files_touched: data.files_touched,
+            scope: data.scope,
+            target: data.target,
+            validation: data.validation,
             attempts: data.attempts,
             failure_chain: data.failure_chain
           }]);
@@ -102,7 +105,9 @@ export default function ChatInterface({ onProposal }) {
               text: data.plan,
               id: data.id,
               path: data.path,
-              files: data.files_touched,
+              files_touched: data.files_touched,
+              scope: data.scope,
+              target: data.target,
               attempts: data.attempts,
               failure_chain: data.failure_chain
             }]);
@@ -118,13 +123,16 @@ export default function ChatInterface({ onProposal }) {
             text: data.plan,
             id: data.id,
             path: data.path,
-            files: data.files_touched,
+            files_touched: data.files_touched,
+            scope: data.scope,
+            target: data.target,
             attempts: data.attempts,
             failure_chain: data.failure_chain
           }]);
+          if (onProposal) onProposal(data);
         } else {
           // Fallback for any other status
-          setMessages(m => [...m, { role: 'proposal', text: data.plan, id: data.id, path: data.path, files: data.files_touched }]);
+          setMessages(m => [...m, { role: 'proposal', text: data.plan, id: data.id, path: data.path, files_touched: data.files_touched, scope: data.scope, target: data.target }]);
           if (onProposal) onProposal(data);
         }
       }

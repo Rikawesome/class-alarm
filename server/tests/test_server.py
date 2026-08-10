@@ -12,6 +12,8 @@ from server.main import (
     GenerationProposalOutput,
     ProposalOutput,
     RegistrationRequest,
+    classify_failure,
+    classify_provider_error,
     _source_files,
     app,
     build_system_prompt,
@@ -19,6 +21,7 @@ from server.main import (
     is_fast_path,
     load_all_contracts,
     parse_generated_proposal,
+    ui_component_is_imported_and_rendered,
     validate_registration_request,
     validate_file_paths,
 )
@@ -79,6 +82,7 @@ class TestEvolutionServer(unittest.TestCase):
                 "alarm-engine", "app-runtime", "core-data", "evolution-server",
                 "personal-data",
                 "governance", "risk-flag", "ui", "web-shell", "weekly-goals",
+                "revision-planner",
             },
         )
         for module_id, contract in contracts.items():
@@ -245,6 +249,14 @@ class TestEvolutionServer(unittest.TestCase):
             self.assertIn("model", data)
             self.assertIn("api_key_configured", data)
 
+    def test_provider_errors_have_stable_categories(self):
+        quota = classify_provider_error(RuntimeError("429 RESOURCE_EXHAUSTED"))
+        self.assertEqual(quota["category"], "transient_provider")
+        self.assertTrue(quota["retryable"])
+        auth = classify_provider_error(RuntimeError("403 PERMISSION_DENIED"))
+        self.assertEqual(auth["category"], "configuration")
+        self.assertFalse(auth["retryable"])
+
     def test_fast_path_classification(self):
         fast_proposal = ProposalOutput(
             plan="Change header color",
@@ -278,6 +290,54 @@ class TestEvolutionServer(unittest.TestCase):
             registration_request=self._registration_request(),
         )
         self.assertFalse(is_fast_path(registration_proposal))
+
+    def test_ui_integration_requires_a_real_import_and_jsx_render(self):
+        component = "SampleFeature"
+        self.assertTrue(ui_component_is_imported_and_rendered(
+            "import SampleFeature from './SampleFeature.jsx';\n"
+            "export default function App() { return <SampleFeature />; }",
+            component,
+        ))
+        self.assertFalse(ui_component_is_imported_and_rendered(
+            "import SampleFeature from './SampleFeature.jsx';\n"
+            "export default function App() { return <main>Schedule</main>; }",
+            component,
+        ))
+        self.assertFalse(ui_component_is_imported_and_rendered(
+            "// <SampleFeature />\n"
+            "export default function App() { return <main>Schedule</main>; }",
+            component,
+        ))
+
+    @patch("server.main.get_baseline_health", return_value={"healthy": True})
+    @patch("server.main.run_command", return_value=(0, "", ""))
+    def test_fast_path_runs_production_build_but_skips_full_suite(
+        self,
+        mock_run_command,
+        mock_baseline_health,
+    ):
+        proposal = {
+            "plan": "Change header color",
+            "files_touched": ["evolvable/ui/styles.css"],
+            "operations": [{
+                "action": "modify",
+                "path": "evolvable/ui/styles.css",
+                "content": Path("evolvable/ui/styles.css").read_text(encoding="utf-8")
+                + "\nbody { color: #222; }\n",
+            }],
+        }
+        pending_file = self._write_pending("test-fast-build-gate", proposal)
+        try:
+            with TestClient(app) as client:
+                report = client.post("/proposals/test-fast-build-gate/validate").json()
+            self.assertTrue(report["valid"])
+            self.assertEqual(report["steps"]["baseline_health"], "pass")
+            self.assertEqual(report["steps"]["production_build"], "pass")
+            self.assertEqual(report["steps"]["test_suite"], "skipped")
+            self.assertTrue(any(args and args[0][:2] == ["npm.cmd", "run"] for args, _ in mock_run_command.call_args_list))
+            mock_baseline_health.assert_called_once()
+        finally:
+            pending_file.unlink(missing_ok=True)
 
     def test_validate_file_paths(self):
         invalid_proposal = ProposalOutput(
@@ -396,7 +456,7 @@ class TestEvolutionServer(unittest.TestCase):
                 report = client.post("/proposals/test-ui-integration/validate").json()
             self.assertFalse(report["valid"])
             self.assertEqual(report["steps"]["ui_integration"], "fail")
-            self.assertIn("does not render", report["errors"][0])
+            self.assertIn("must import and render", report["errors"][0])
         finally:
             pending_file.unlink(missing_ok=True)
 
@@ -443,7 +503,7 @@ class TestEvolutionServer(unittest.TestCase):
         with TestClient(app) as client:
             with patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": ""}):
                 response = client.post("/evolve", json={"text": "Add dark mode"})
-                self.assertEqual(response.status_code, 500)
+                self.assertEqual(response.status_code, 503)
                 self.assertIn("error", response.json())
 
     def test_validation_rejects_empty_noop_proposal(self):
@@ -459,6 +519,27 @@ class TestEvolutionServer(unittest.TestCase):
             self.assertFalse(report["valid"])
             self.assertEqual(report["steps"]["proposal_integrity"], "fail")
             self.assertIn("no file operations", report["errors"][0])
+        finally:
+            pending_file.unlink(missing_ok=True)
+
+    def test_personal_scope_is_recognized_but_not_enabled_in_global_lane(self):
+        proposal = {
+            "plan": "Add a personal study preference",
+            "scope": "personal",
+            "target": "user-123",
+            "artifact_manifest": ["ui/personal-study-preferences.js"],
+            "files_touched": ["ui/personal-study-preferences.js"],
+            "operations": [],
+        }
+        pending_file = self._write_pending("test-personal-scope", proposal)
+        try:
+            with TestClient(app) as client:
+                report = client.post("/proposals/test-personal-scope/validate").json()
+            self.assertFalse(report["valid"])
+            self.assertEqual(report["steps"]["scope_authorization"], "fail")
+            self.assertIn("not enabled yet", report["errors"][0])
+            self.assertFalse(is_fast_path(ProposalOutput.model_validate(proposal)))
+            self.assertEqual(classify_failure(report["steps"], report["errors"]), "UNFIXABLE")
         finally:
             pending_file.unlink(missing_ok=True)
 

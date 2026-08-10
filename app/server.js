@@ -5,6 +5,7 @@ import { extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { closeCourseDatabase } from "../locked/core-data/db.js";
+import { closePersonalDatabase } from "../locked/personal-data/access.js";
 import { createClassAlarmRuntime } from "./runtime.js";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -300,6 +301,7 @@ export async function createApplicationServer({
     removeNotificationListener();
     runtime.stop();
     closeCourseDatabase();
+    closePersonalDatabase();
 
     for (const client of eventClients) {
       client.end();

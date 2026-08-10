@@ -45,6 +45,45 @@ test("persists JSON records across a new process", async () => {
   createPersonalDataCapabilityForModule("risk-flag").delete("current");
 });
 
+test("migrates a legacy backup table before using namespace upserts", async () => {
+  const legacyRoot = await mkdtemp(join(tmpdir(), "darwin-personal-data-legacy-"));
+  const legacyPath = join(legacyRoot, "personal.db");
+  const createLegacyDatabase = `
+    import { DatabaseSync } from 'node:sqlite';
+    const database = new DatabaseSync(process.env.CLASS_ALARM_PERSONAL_DB_PATH);
+    database.exec(\`
+      CREATE TABLE personal_namespace_backups (
+        namespace TEXT NOT NULL,
+        snapshot_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+    \`);
+    database.close();
+  `;
+  const migrateAndInspect = `
+    const { createPersonalDataCapabilityForModule, closePersonalDatabase } = await import('./locked/personal-data/access.js');
+    const { db } = await import('./locked/personal-data/db.js');
+    createPersonalDataCapabilityForModule('risk-flag').set('migration-check', { isRisky: true });
+    const columns = db.prepare('PRAGMA table_info(personal_namespace_backups)').all();
+    process.stdout.write(JSON.stringify(columns));
+    closePersonalDatabase();
+  `;
+  try {
+    await execFileAsync(process.execPath, ["--input-type=module", "--eval", createLegacyDatabase], {
+      cwd: ROOT,
+      env: { ...process.env, CLASS_ALARM_PERSONAL_DB_PATH: legacyPath },
+    });
+    const { stdout } = await execFileAsync(process.execPath, ["--input-type=module", "--eval", migrateAndInspect], {
+      cwd: ROOT,
+      env: { ...process.env, CLASS_ALARM_PERSONAL_DB_PATH: legacyPath },
+    });
+    const columns = JSON.parse(stdout);
+    assert.equal(columns.find((column) => column.name === "namespace").pk, 1);
+  } finally {
+    await rm(legacyRoot, { recursive: true, force: true });
+  }
+});
+
 test("capabilities cannot cross namespaces", () => {
   const goals = createPersonalDataCapabilityForModule("risk-flag");
   const planner = createPersonalDataCapabilityForModule("ui");

@@ -54,7 +54,7 @@ a:focus-visible {
   height: 100vh;
   padding: 22px 16px 18px;
   color: #f7faf8;
-  background: #173f35;
+  background: #12352b;
 }
 
 .brand-lockup,
@@ -962,6 +962,65 @@ button:disabled {
   transform: translateY(0);
 }
 
+/* Revision Planner Component Specific Styles */
+.revision-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.revision-input {
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #ffffff;
+  color: #202622;
+}
+
+.revision-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.revision-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #fafbfa;
+  border: 1px solid #e5e9e7;
+  border-radius: 6px;
+}
+
+.revision-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: inherit;
+  display: block;
+}
+
+.revision-title.completed {
+  text-decoration: line-through;
+  color: #78817c;
+}
+
+.revision-sub {
+  color: #78817c;
+  font-size: 11px;
+}
+
+@media (max-width: 768px) {
+  .revision-form {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Dark Theme Overrides */
 .dark-theme {
   color: #e2e8f0;
@@ -1148,4 +1207,28 @@ button:disabled {
 
 .dark-theme .panel li label {
   color: #f8fafc !important;
+}
+
+/* Dark Theme Overrides for Revision Planner */
+.dark-theme .revision-input {
+  background: #0f172a;
+  color: #f8fafc;
+  border: 1px solid #475569;
+}
+
+.dark-theme .revision-item {
+  background: #0f172a;
+  border: 1px solid #334155;
+}
+
+.dark-theme .revision-title {
+  color: #f8fafc;
+}
+
+.dark-theme .revision-title.completed {
+  color: #94a3b8;
+}
+
+.dark-theme .revision-sub {
+  color: #94a3b8;
 }

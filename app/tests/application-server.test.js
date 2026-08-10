@@ -6,6 +6,7 @@ import { after, before, test } from "node:test";
 
 const temporaryRoot = await mkdtemp(join(tmpdir(), "darwin-app-"));
 process.env.CLASS_ALARM_DB_PATH = join(temporaryRoot, "application.db");
+process.env.CLASS_ALARM_PERSONAL_DB_PATH = join(temporaryRoot, "personal.db");
 
 const { createClassAlarmRuntime } = await import("../runtime.js");
 const { createApplicationServer } = await import("../server.js");

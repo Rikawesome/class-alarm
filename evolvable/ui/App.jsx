@@ -6,6 +6,7 @@ import ApprovalModal from './ApprovalModal.jsx';
 import ChatInterface from './ChatInterface.jsx';
 import WeeklyGoals from './WeeklyGoals.jsx';
 import RevisionPlanner from './RevisionPlanner.jsx';
+import TodayOverview from './TodayOverview.jsx';
 
 function LiveClock() {
   const [time, setTime] = useState(new Date());
@@ -57,6 +58,13 @@ export default function App() {
       .then(r => r.json())
       .then(applySnapshot)
       .catch(() => setError('Could not load data from server.'));
+  }, [applySnapshot]);
+
+  const refreshSnapshot = useCallback(() => {
+    fetch('/api/bootstrap')
+      .then(r => r.json())
+      .then(applySnapshot)
+      .catch(() => setError('The app changed, but the latest state could not be loaded.'));
   }, [applySnapshot]);
 
   useEffect(() => {
@@ -146,6 +154,7 @@ export default function App() {
           <div>
             <p className="date-label">{new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</p>
             <h1>My Schedule</h1>
+            <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#6e7772' }}>Stay ahead of every class.</p>
           </div>
           <div className="topbar-actions">
             <LiveClock />
@@ -220,6 +229,7 @@ export default function App() {
             />
           </div>
 
+          <TodayOverview courses={courses} nextAlarm={nextAlarm} />
           <WeeklyGoals />
           <RevisionPlanner courses={courses} />
         </main>
@@ -232,7 +242,10 @@ export default function App() {
       {pendingProposal && (
         <ApprovalModal
           proposal={pendingProposal}
-          onApprove={() => setPendingProposal(null)}
+          onApprove={() => {
+            setPendingProposal(null);
+            refreshSnapshot();
+          }}
           onDismiss={() => setPendingProposal(null)}
         />
       )}

@@ -57,6 +57,12 @@ MIN_RETAINED_CONTENT_RATIO = 0.6
 # Maximum number of times the pipeline will automatically retry a proposal
 # after a fixable validation failure before escalating to the developer.
 MAX_RETRY_ATTEMPTS = 3
+PROVIDER_RETRY_ATTEMPTS = 2
+
+# The control plane must never judge a proposal against an already-broken
+# application. Cache a successful/failed baseline report until source changes;
+# this avoids paying for the build and test suite on every endpoint call.
+_BASELINE_HEALTH_CACHE: Optional[dict] = None
 
 # ---------------------------------------------------------------------------
 # Failure classification
@@ -82,7 +88,12 @@ FIXABLE_GATES = {
     "test_suite",
     "content_wipe_check",
 }
-UNFIXABLE_GATES = {"path_safety", "locked_protection", "dependency_analysis"}
+UNFIXABLE_GATES = {
+    "path_safety",
+    "locked_protection",
+    "dependency_analysis",
+    "scope_authorization",
+}
 
 
 def classify_failure(steps: dict, errors: list) -> str:
@@ -286,6 +297,18 @@ class GenerationRegistrationRequest(BaseModel):
 
 class ProposalOutput(BaseModel):
     plan: str = Field(description="Clear step-by-step description of proposed change")
+    scope: Literal["global", "personal"] = Field(
+        default="global",
+        description="Evolution authority scope. Personal scope is reserved for the user-artifact lane.",
+    )
+    target: Optional[str] = Field(
+        default=None,
+        description="Optional user or artifact target. Required when scope is personal.",
+    )
+    artifact_manifest: List[str] = Field(
+        default_factory=list,
+        description="User-owned artifacts produced by personal evolution; empty for repository changes.",
+    )
     files_touched: List[str] = Field(description="All file paths relative to repository root")
     operations: List[FileOperation] = Field(description="Explicit operations to execute")
     contract_effects: ContractEffects = Field(default_factory=ContractEffects)
@@ -302,6 +325,9 @@ class ProposalOutput(BaseModel):
 
 class GenerationProposalOutput(BaseModel):
     plan: str = Field(description="Clear step-by-step description of proposed change")
+    scope: Literal["global", "personal"] = "global"
+    target: Optional[str] = None
+    artifact_manifest: List[str] = Field(default_factory=list)
     files_touched: List[str] = Field(description="All file paths relative to repository root")
     operations: List[FileOperation] = Field(description="Explicit operations to execute")
     contract_effects: ContractEffects = Field(default_factory=ContractEffects)
@@ -334,6 +360,21 @@ def get_gemini_client() -> Optional[genai.Client]:
     if not api_key:
         return None
     return genai.Client(api_key=api_key)
+
+
+def classify_provider_error(error: Exception) -> dict:
+    """Normalize provider failures into stable API-facing categories."""
+    message = str(error)
+    upper = message.upper()
+    if "API KEY" in upper or "GOOGLE_API_KEY" in upper or "GEMINI_API_KEY" in upper:
+        category, retryable, status = "configuration", False, 503
+    elif any(token in upper for token in ("401", "UNAUTHENTICATED", "403", "PERMISSION_DENIED", "404", "NOT_FOUND")):
+        category, retryable, status = "configuration", False, 503
+    elif any(token in upper for token in ("429", "RESOURCE_EXHAUSTED", "QUOTA", "503", "UNAVAILABLE", "TIMEOUT", "CONNECTION")):
+        category, retryable, status = "transient_provider", True, 503
+    else:
+        category, retryable, status = "generation", False, 500
+    return {"category": category, "retryable": retryable, "status_code": status, "detail": message}
 
 
 def is_protected_path(path_str: str) -> bool:
@@ -687,7 +728,14 @@ so do not attempt to work around them):
     import/render that symbol in the entry_file; do not claim UI integration in
     files_touched without changing the actual entry file content.
 
-Respond only with the requested JSON schema."""
+    11. Scope rules are strict: use scope "global" for every ordinary request,
+    including UI and stylesheet changes. Only use scope "personal" when the
+    user explicitly asks for a change private to a named user or personal
+    artifact. Personal scope is not enabled in this repository yet; never
+    infer it from a file path, target, or artifact_manifest. For global
+    requests, target must be null and artifact_manifest must be [].
+
+    Respond only with the requested JSON schema."""
 
 
 def append_log(entry: dict):
@@ -725,6 +773,30 @@ def find_imports(code: str) -> List[str]:
     imports += re.findall(r'''\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)''', code)
     imports += re.findall(r'''\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)''', code)
     return [imp.strip() for imp in imports]
+
+
+def ui_component_is_imported_and_rendered(source: str, symbol: str) -> bool:
+    """Return whether a JSX component is both imported and rendered in source."""
+    if not re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", symbol):
+        return False
+
+    escaped_symbol = re.escape(symbol)
+    imported_as_default = re.search(
+        rf"\bimport\s+{escaped_symbol}\s*(?:,|from\s*['\"])", source
+    )
+    imported_as_named = re.search(
+        rf"\bimport\s+(?:[A-Za-z_$][A-Za-z0-9_$]*\s*,\s*)?"
+        rf"\{{[^}}]*\b(?:{escaped_symbol}|[A-Za-z_$][A-Za-z0-9_$]*\s+as\s+{escaped_symbol})\b[^}}]*\}}\s*from\s*['\"]",
+        source,
+        flags=re.DOTALL,
+    )
+    if not (imported_as_default or imported_as_named):
+        return False
+
+    # Ignore ordinary JavaScript comments so a commented-out component cannot
+    # satisfy the render proof. The JSX expression itself is then required.
+    without_comments = re.sub(r"/\*.*?\*/|//[^\n]*", "", source, flags=re.DOTALL)
+    return re.search(rf"<\s*{escaped_symbol}(?=\s|/|>)", without_comments) is not None
 
 
 def resolve_import_path(importing_file_path: str, import_str: str) -> Optional[str]:
@@ -768,6 +840,48 @@ def run_command(args: List[str], cwd: Optional[Path] = None, timeout: int = 120,
             stdout,
             f"Command timed out after {timeout}s: {' '.join(args)}\n{stderr}",
         )
+
+
+def baseline_source_fingerprint() -> tuple:
+    """Return a cheap fingerprint of files that can affect app health."""
+    tracked_roots = ("app", "evolvable", "governance", "locked", "registry", "web")
+    files = [ROOT / "package.json", ROOT / "package-lock.json", ROOT / "vite.config.js"]
+    for relative_root in tracked_roots:
+        root = ROOT / relative_root
+        if root.exists():
+            files.extend(path for path in root.rglob("*") if path.is_file())
+    return tuple(
+        (path.relative_to(ROOT).as_posix(), path.stat().st_mtime_ns, path.stat().st_size)
+        for path in sorted(files)
+    )
+
+
+def get_baseline_health() -> dict:
+    """Build and test the unmodified application before accepting proposals."""
+    global _BASELINE_HEALTH_CACHE
+    fingerprint = baseline_source_fingerprint()
+    if _BASELINE_HEALTH_CACHE and _BASELINE_HEALTH_CACHE["fingerprint"] == fingerprint:
+        return _BASELINE_HEALTH_CACHE["report"]
+
+    build_code, build_out, build_err = run_command([npm_cmd(), "run", "build"])
+    if build_code != 0:
+        report = {
+            "healthy": False,
+            "stage": "production_build",
+            "error": (build_err or build_out).strip(),
+        }
+    else:
+        test_code, test_out, test_err = run_command(
+            ["node", "--test", "--test-concurrency=1"], timeout=180
+        )
+        report = {
+            "healthy": test_code == 0,
+            "stage": "test_suite" if test_code != 0 else None,
+            "error": (test_err or test_out).strip() if test_code != 0 else None,
+        }
+
+    _BASELINE_HEALTH_CACHE = {"fingerprint": fingerprint, "report": report}
+    return report
 
 
 # FIX #15: a fixed, real, persistent location for Vite's dependency
@@ -935,7 +1049,7 @@ def is_fast_path(proposal: ProposalOutput) -> bool:
     decides fast vs full â€” every entry point must call this, no exceptions,
     no hardcoded overrides.
     """
-    if proposal.registration_request is not None:
+    if proposal.scope != "global" or proposal.registration_request is not None:
         return False
 
     all_paths = set(proposal.files_touched) | {op.path for op in proposal.operations}
@@ -994,6 +1108,7 @@ def validate_proposal(request_id: str) -> dict:
     proposal_file = PENDING_DIR / f"{request_id}.json"
     steps = {
         "proposal_integrity": "pending",
+        "scope_authorization": "pending",
         "path_safety": "pending",
         "registration": "pending",
         "module_ownership": "pending",
@@ -1003,6 +1118,7 @@ def validate_proposal(request_id: str) -> dict:
         "syntax_check": "pending",
         "extension_contract": "pending",
         "ui_integration": "pending",
+        "baseline_health": "pending",
         "test_suite": "pending",
         "production_build": "pending",
     }
@@ -1033,6 +1149,20 @@ def validate_proposal(request_id: str) -> dict:
             "Proposal contains no file operations; empty proposals cannot be approved or applied."
         ])
     steps["proposal_integrity"] = "pass"
+
+    if proposal.scope == "personal":
+        steps["scope_authorization"] = "fail"
+        return fail([
+            "Personal evolution is not enabled yet. Personal-scoped proposals are "
+            "schema-compatible but cannot write or activate artifacts in the global lane."
+        ])
+    if proposal.target is not None or proposal.artifact_manifest:
+        steps["scope_authorization"] = "fail"
+        return fail([
+            "Global proposals cannot declare a personal target or artifact_manifest. "
+            "Use scope 'personal' only for an explicitly private request."
+        ])
+    steps["scope_authorization"] = "pass"
 
     try:
         validate_file_paths(proposal)
@@ -1102,14 +1232,13 @@ def validate_proposal(request_id: str) -> dict:
                 f"UI integration must modify exactly one entry file: {integration.entry_file}."
             ])
         ui_content = ui_operations[0].content or ""
-        # The UI entry commonly references the component symbol (for example
-        # WeeklyGoals) without repeating the registry's kebab-case feature ID.
-        # The symbol is the authoritative render proof; the feature ID remains
-        # proposal metadata and is still required by the contract.
-        if integration.rendered_symbol not in ui_content:
+        if not ui_component_is_imported_and_rendered(
+            ui_content,
+            integration.rendered_symbol,
+        ):
             steps["ui_integration"] = "fail"
             return fail([
-                f"UI entry file {integration.entry_file} does not render "
+                f"UI entry file {integration.entry_file} must import and render "
                 f"feature '{integration.feature_id}' via '{integration.rendered_symbol}'."
             ])
         steps["ui_integration"] = "pass"
@@ -1193,14 +1322,11 @@ def validate_proposal(request_id: str) -> dict:
     if errors:
         return fail(errors)
 
-    if is_fast_path(proposal):
-        # The structural and governance checks above are the meaningful gates
-        # for a stylesheet-only proposal. Avoid paying for a repository copy,
-        # production build, and full test suite for a color/style edit.
-        steps["syntax_check"] = "skipped"
-        steps["production_build"] = "skipped"
-        steps["test_suite"] = "skipped"
-        return {"valid": True, "errors": [], "steps": steps, "timings_ms": timings_ms, "path": "fast"}
+    baseline_health = get_baseline_health()
+    if not baseline_health["healthy"]:
+        steps["baseline_health"] = "fail"
+        return fail([f"Baseline health check failed at {baseline_health['stage']}: {baseline_health['error']}"])
+    steps["baseline_health"] = "pass"
 
     syntax_ok = True
     _t0 = time.monotonic()
@@ -1290,6 +1416,13 @@ def validate_proposal(request_id: str) -> dict:
             steps["production_build"] = "fail"
             return fail(errors)
         steps["production_build"] = "pass"
+
+        # Stylesheet-only proposals still need a real production build, but
+        # do not need to rerun the complete JavaScript suite after the clean
+        # baseline preflight has passed.
+        if is_fast_path(proposal):
+            steps["test_suite"] = "skipped"
+            return {"valid": True, "errors": [], "steps": steps, "timings_ms": timings_ms, "path": "fast"}
 
         # FIX #5: expand globs ourselves in Python instead of relying on
         # shell expansion, which does not happen on Windows with shell=True.
@@ -1410,7 +1543,7 @@ def apply_proposal(request_id: str, human_approved: bool = False) -> dict:
 
         verify_applied_operations(proposal)
 
-        ret, out, err = (0, "", "") if actual_path_type == "fast" else run_command(
+        ret, out, err = run_command(
             [npm_cmd(), "run", "build"],
             env_overrides={"DARWIN_VITE_CACHE_DIR": str(VITE_CACHE_DIR)},
         )
@@ -1427,11 +1560,12 @@ def apply_proposal(request_id: str, human_approved: bool = False) -> dict:
         ])
         if actual_path_type != "fast" and not test_files:
             raise RuntimeError("No test files found â€” refusing to apply without a real test run.")
-        ret, out, err = (0, "", "") if actual_path_type == "fast" else run_command(
-            ["node", "--test", "--test-concurrency=1", *test_files]
-        )
-        if ret != 0:
-            raise RuntimeError(f"Test suite failed:\n{err or out}")
+        if actual_path_type != "fast":
+            ret, out, err = run_command(
+                ["node", "--test", "--test-concurrency=1", *test_files]
+            )
+            if ret != 0:
+                raise RuntimeError(f"Test suite failed:\n{err or out}")
 
         meta["status"] = "applied"
         meta["applied_at"] = datetime.now(timezone.utc).isoformat()
@@ -1475,7 +1609,19 @@ def apply_proposal(request_id: str, human_approved: bool = False) -> dict:
 
 async def health(request: Request):
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    return JSONResponse({"status": "ok", "model": get_model_name(), "api_key_configured": bool(api_key)})
+    baseline = get_baseline_health()
+    provider = {
+        "configured": bool(api_key),
+        "model": get_model_name(),
+        "status": "configured" if api_key else "missing_credentials",
+    }
+    return JSONResponse({
+        "status": "ok" if baseline["healthy"] and api_key else "degraded",
+        "model": get_model_name(),
+        "api_key_configured": bool(api_key),
+        "provider": provider,
+        "baseline": baseline,
+    }, status_code=200 if baseline["healthy"] and api_key else 503)
 
 
 async def list_proposals(request: Request):
@@ -1575,16 +1721,27 @@ def _generate_proposal(client, model_name: str, system_prompt: str, context: str
     directly rather than assuming it's fast).
     """
     _t0 = time.monotonic()
-    response = client.models.generate_content(
-        model=model_name,
-        contents=context,
-        config=types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            response_mime_type="application/json",
-            response_schema=GenerationProposalOutput,
-            temperature=0.1,
-        ),
-    )
+    response = None
+    for provider_attempt in range(1, PROVIDER_RETRY_ATTEMPTS + 1):
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=context,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    response_mime_type="application/json",
+                    response_schema=GenerationProposalOutput,
+                    temperature=0.1,
+                ),
+            )
+            break
+        except Exception as error:
+            provider = classify_provider_error(error)
+            if not provider["retryable"] or provider_attempt >= PROVIDER_RETRY_ATTEMPTS:
+                raise
+            time.sleep(min(2 ** (provider_attempt - 1), 4))
+    if response is None:
+        raise RuntimeError("Model provider returned no response.")
     generation_ms = round((time.monotonic() - _t0) * 1000)
     proposal = parse_generated_proposal(json.loads(response.text))
     validate_file_paths(proposal)
@@ -1655,14 +1812,23 @@ def _run_auto_evolve_loop(
             proposal, generation_ms = _generate_proposal(client, model_name, system_prompt, context)
         except Exception as gen_err:
             error_msg = str(gen_err)
+            provider = classify_provider_error(gen_err)
             append_log({
                 "id": session_id, "timestamp": now_iso, "request": req_text,
                 "model": model_name, "path": "none", "status": "failed",
-                "error": error_msg, "attempt": attempt,
+                "error": error_msg, "provider": provider, "attempt": attempt,
             })
             return JSONResponse(
-                {"error": f"Proposal generation failed: {error_msg}"},
-                status_code=500,
+                {
+                    "error": "Proposal generation failed.",
+                    "provider": provider,
+                    "message": (
+                        "The model provider is temporarily unavailable. Please retry shortly."
+                        if provider["retryable"]
+                        else "The evolution provider configuration is invalid or unsupported."
+                    ),
+                },
+                status_code=provider["status_code"],
             )
 
         last_proposal = proposal
@@ -1674,6 +1840,9 @@ def _run_auto_evolve_loop(
             "timestamp": now_iso,
             "request": req_text,
             "model": model_name,
+            "scope": proposal.scope,
+            "target": proposal.target,
+            "artifact_manifest": proposal.artifact_manifest,
             "path": path_type,
             "status": "pending_review",
             "human_approved": False,
@@ -1699,6 +1868,9 @@ def _run_auto_evolve_loop(
             return JSONResponse({
                 "id": attempt_id,
                 "session_id": session_id,
+                "scope": proposal.scope,
+                "target": proposal.target,
+                "artifact_manifest": proposal.artifact_manifest,
                 "path": path_type,
                 "status": "pending_review",
                 "plan": proposal.plan,
@@ -1829,12 +2001,16 @@ async def evolve(request: Request):
         return JSONResponse({"error": "Evolution request text cannot be empty."}, status_code=400)
 
     if not client:
+        provider = {"category": "configuration", "retryable": False, "status_code": 503, "detail": "GEMINI_API_KEY or GOOGLE_API_KEY not configured."}
         append_log({
             "id": session_id, "timestamp": now_iso, "request": req_text, "model": model_name,
             "path": "none", "status": "failed",
-            "error": "GEMINI_API_KEY or GOOGLE_API_KEY not configured.",
+            "error": provider["detail"], "provider": provider,
         })
-        return JSONResponse({"error": "Gemini API key is missing."}, status_code=500)
+        return JSONResponse({
+            "error": "Gemini API key is missing.",
+            "provider": provider,
+        }, status_code=503)
 
     auto_retry = bool(body.get("auto_retry", False))
 
@@ -1859,6 +2035,8 @@ async def evolve(request: Request):
 
         proposal_record = {
             "id": session_id, "timestamp": now_iso, "request": req_text, "model": model_name,
+            "scope": proposal.scope, "target": proposal.target,
+            "artifact_manifest": proposal.artifact_manifest,
             "path": path_type, "status": "pending_review", "human_approved": False,
             "plan": proposal.plan, "files_touched": proposal.files_touched,
             "generation_ms": generation_ms,
@@ -1872,18 +2050,26 @@ async def evolve(request: Request):
         append_log(proposal_record)
 
         return JSONResponse({
-            "id": session_id, "path": path_type, "status": "pending_review",
+            "id": session_id, "scope": proposal.scope, "target": proposal.target,
+            "artifact_manifest": proposal.artifact_manifest,
+            "path": path_type, "status": "pending_review",
             "plan": proposal.plan, "files_touched": proposal.files_touched,
         })
 
     except Exception as err:
         error_msg = str(err)
+        provider = classify_provider_error(err)
         append_log({
             "id": session_id, "timestamp": now_iso, "request": req_text, "model": model_name,
-            "path": "none", "status": "failed", "error": error_msg,
+            "path": "none", "status": "failed", "error": error_msg, "provider": provider,
         })
         status_code = 400 if isinstance(err, (ValueError, json.JSONDecodeError)) else 500
-        return JSONResponse({"error": f"Proposal generation failed: {error_msg}"}, status_code=status_code)
+        if status_code == 500:
+            status_code = provider["status_code"]
+        return JSONResponse({
+            "error": f"Proposal generation failed: {error_msg}",
+            "provider": provider,
+        }, status_code=status_code)
 
 
 async def validate_proposal_endpoint(request: Request):
