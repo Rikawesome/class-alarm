@@ -10,6 +10,18 @@ export default function ApprovalModal({ proposal, onApprove, onDismiss }) {
     setLoading(true);
     setError('');
     try {
+      if (proposal.scope === 'personal') {
+        const userId = localStorage.getItem('darwin_user_id');
+        const headers = userId ? { 'X-Darwin-User-Id': userId } : {};
+        const approveRes = await fetch('http://localhost:8000/personal/artifacts/' + proposal.id + '/approve', { method: 'POST', headers });
+        if (!approveRes.ok) throw new Error('The personal artifact could not be approved.');
+        const activateRes = await fetch('http://localhost:8000/personal/artifacts/' + proposal.id + '/activate', { method: 'POST', headers });
+        const activateData = await activateRes.json();
+        if (!activateRes.ok) throw new Error(activateData.error || 'The personal artifact could not be activated.');
+        setStatus('active');
+        if (onApprove) onApprove(activateData);
+        return;
+      }
       const validationRes = await fetch('http://localhost:8000/proposals/' + proposal.id + '/validate', { method: 'POST' });
       const validationData = await validationRes.json();
       setValidation(validationData);
@@ -47,6 +59,12 @@ export default function ApprovalModal({ proposal, onApprove, onDismiss }) {
             Files: {proposal.files_touched.join(', ')}
           </div>
         )}
+        {proposal.scope === 'personal' && proposal.artifact && (
+          <div style={{ marginBottom: 14, fontSize: 12, color: '#57615c' }}>
+            Personal artifact: {proposal.artifact.manifest_json}<br />
+            Version {proposal.artifact.version} · Draft validated
+          </div>
+        )}
 
         {validation?.steps && (
           <div style={{ marginBottom: 14, padding: '10px 12px', background: '#fafbfa', border: '1px solid #e3e7e5', borderRadius: 6, fontSize: 11 }}>
@@ -56,7 +74,7 @@ export default function ApprovalModal({ proposal, onApprove, onDismiss }) {
 
         {error && <div className="error-banner">{error}</div>}
 
-        {status === 'applied' ? (
+        {status === 'applied' || status === 'active' ? (
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button className="primary-button small-button" style={{ width: 'auto' }} onClick={onDismiss}>Done</button>
           </div>

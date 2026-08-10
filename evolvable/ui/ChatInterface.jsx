@@ -2,7 +2,7 @@
 import { Sparkles, X } from 'lucide-react';
 import './ChatInterface.css';
 
-export default function ChatInterface({ onProposal }) {
+export default function ChatInterface({ onProposal, personalMode = false }) {
   const progressMessages = [
     'Listening to your idea…',
     'Tracing where this belongs…',
@@ -45,10 +45,17 @@ export default function ChatInterface({ onProposal }) {
     }, 2200);
 
     try {
-      const res = await fetch('http://localhost:8000/evolve', {
+      const userId = personalMode
+        ? (localStorage.getItem('darwin_user_id') || (() => {
+          const id = crypto.randomUUID();
+          localStorage.setItem('darwin_user_id', id);
+          return id;
+        })())
+        : null;
+      const res = await fetch(personalMode ? 'http://localhost:8000/personal/evolve' : 'http://localhost:8000/evolve', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, auto_retry: true }), // Use auto_retry for self-healing
+        headers: { 'Content-Type': 'application/json', ...(userId ? { 'X-Darwin-User-Id': userId } : {}) },
+        body: JSON.stringify({ text, auto_retry: true }),
       });
       const data = await res.json();
 
@@ -58,8 +65,18 @@ export default function ChatInterface({ onProposal }) {
       if (!res.ok) {
         setMessages(m => [...m, { role: 'error', text: 'This evolution could not safely take root. ' + (data.error || 'Please try a different request.') }]);
       } else {
-        // Handle different response types from the auto_retry endpoint
-        if (data.status === 'pending_review') {
+        // Personal requests return a validated draft artifact.
+        if (data.status === 'draft') {
+          setMessages(m => [...m, {
+            role: 'proposal',
+            text: 'A private artifact is ready for your approval.',
+            id: data.artifact?.artifact_id,
+            scope: 'personal',
+            target: data.branch?.user_id,
+            artifact: data.artifact,
+          }]);
+          if (onProposal) onProposal({ ...data, id: data.artifact?.artifact_id, scope: 'personal', path: 'personal' });
+        } else if (data.status === 'pending_review') {
           // Success (either first attempt or after retries)
           const attemptCount = data.attempts || 1;
           if (attemptCount > 1) {
@@ -177,6 +194,7 @@ export default function ChatInterface({ onProposal }) {
                 <div>
                   <div className="chat-proposal-label">Proposal ({msg.path} path){msg.attempts && msg.attempts > 1 ? " (after " + msg.attempts + " attempt(s))" : ""}</div>
                   <div className="chat-proposal-plan">{msg.text}</div>
+                  {msg.artifact && <div className="chat-proposal-files">{msg.artifact.manifest_json}</div>}
                   {msg.files?.length > 0 && (
                     <div className="chat-proposal-files">{msg.files.join(', ')}</div>
                   )}

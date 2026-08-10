@@ -1,4 +1,5 @@
 import atexit
+import hashlib
 import glob as globmod
 import json
 import os
@@ -29,6 +30,8 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+
+from server.personal_store import PersonalArtifactStore, validate_personal_artifact
 
 ROOT = Path(__file__).resolve().parent.parent
 REGISTRY_PATH = ROOT / "registry" / "modules.json"
@@ -340,6 +343,11 @@ class GenerationProposalOutput(BaseModel):
 
 class EvolutionRequest(BaseModel):
     text: str
+
+
+class PersonalGenerationOutput(BaseModel):
+    manifest_json: str
+    content_json: str
 
 
 # ---------------------------------------------------------------------------
@@ -1624,6 +1632,156 @@ async def health(request: Request):
     }, status_code=200 if baseline["healthy"] and api_key else 503)
 
 
+def personal_user_id(request: Request) -> Optional[str]:
+    value = request.headers.get("x-darwin-user-id", "").strip()
+    return value if value and len(value) <= 128 else None
+
+
+async def create_personal_branch(request: Request):
+    user_id = personal_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "A user identity is required for personal evolution."}, status_code=401)
+    store = PersonalArtifactStore()
+    try:
+        return JSONResponse({"branch": store.get_or_create_branch(user_id)}, status_code=200)
+    finally:
+        store.close()
+
+
+async def personal_evolve(request: Request):
+    user_id = personal_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "A user identity is required for personal evolution."}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    intent = str(body.get("text", "")).strip()
+    if not intent:
+        return JSONResponse({"error": "Personal evolution request text cannot be empty."}, status_code=400)
+    client = get_gemini_client()
+    model_name = get_model_name()
+    if not client:
+        provider = {"category": "configuration", "retryable": False, "status_code": 503, "detail": "GEMINI_API_KEY or GOOGLE_API_KEY not configured."}
+        return JSONResponse({"error": "Gemini API key is missing.", "provider": provider}, status_code=503)
+
+    prompt = (
+        "You generate a personal declarative UI artifact for one user of Class Alarm. "
+        "Return only JSON matching the schema. manifest_json and content_json must each "
+        "be valid JSON strings. Never return files_touched, operations, "
+        "imports, JavaScript, JSX, HTML, CSS, repository paths, APIs, storage commands, "
+        "or protected application changes. The manifest kind must be ui-preferences or "
+        "ui-widget and version must be 1. Content must be a small JSON object describing "
+        "the user's private preference or widget. User request: " + intent
+    )
+    try:
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction="Personal artifact lane. Produce declarative JSON only.",
+                response_mime_type="application/json",
+                response_schema=PersonalGenerationOutput,
+                temperature=0.1,
+            ),
+        )
+        generated = PersonalGenerationOutput.model_validate(json.loads(response.text))
+        manifest = json.loads(generated.manifest_json)
+        content = json.loads(generated.content_json)
+        encoded = json.dumps(content, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        content_hash = hashlib.sha256(encoded).hexdigest()
+        validation = validate_personal_artifact(manifest, content, content_hash)
+        store = PersonalArtifactStore()
+        try:
+            branch = store.get_or_create_branch(user_id)
+            artifact = store.create_artifact(branch["branch_id"], manifest, content, content_hash, validation)
+        finally:
+            store.close()
+        return JSONResponse({
+            "status": "draft",
+            "scope": "personal",
+            "branch": branch,
+            "artifact": artifact,
+            "validation": validation,
+        }, status_code=201)
+    except Exception as error:
+        provider = classify_provider_error(error)
+        append_log({"timestamp": datetime.now(timezone.utc).isoformat(), "request": intent, "scope": "personal", "status": "failed", "provider": provider})
+        return JSONResponse({"error": "Personal artifact generation failed.", "provider": provider}, status_code=provider["status_code"])
+
+
+async def validate_personal_artifact_endpoint(request: Request):
+    user_id = personal_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "A user identity is required for personal evolution."}, status_code=401)
+    try:
+        body = await request.json()
+        report = validate_personal_artifact(
+            body.get("manifest", {}), body.get("content", {}), body.get("content_hash", "")
+        )
+        return JSONResponse(report)
+    except (ValueError, json.JSONDecodeError) as error:
+        return JSONResponse({"valid": False, "error": str(error)}, status_code=422)
+
+
+async def create_personal_artifact_endpoint(request: Request):
+    user_id = personal_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "A user identity is required for personal evolution."}, status_code=401)
+    store = PersonalArtifactStore()
+    try:
+        body = await request.json()
+        branch_id = body.get("branch_id")
+        branch = store.get_branch_for_user(branch_id, user_id)
+        if not branch:
+            return JSONResponse({"error": "Personal branch not found for this user."}, status_code=404)
+        artifact = store.create_artifact(
+            branch_id, body.get("manifest", {}), body.get("content", {}), body.get("content_hash", {}), body.get("validation")
+        )
+        return JSONResponse({"artifact": artifact}, status_code=201)
+    except (ValueError, json.JSONDecodeError) as error:
+        return JSONResponse({"error": str(error)}, status_code=422)
+    finally:
+        store.close()
+
+
+async def list_personal_artifacts_endpoint(request: Request):
+    user_id = personal_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "A user identity is required for personal evolution."}, status_code=401)
+    store = PersonalArtifactStore()
+    try:
+        branch = store.get_branch_for_user(request.query_params.get("branch_id", ""), user_id)
+        if not branch:
+            return JSONResponse({"error": "Personal branch not found for this user."}, status_code=404)
+        return JSONResponse({"branch": branch, "artifacts": store.list_artifacts(branch["branch_id"])})
+    finally:
+        store.close()
+
+
+async def personal_artifact_action(request: Request):
+    user_id = personal_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "A user identity is required for personal evolution."}, status_code=401)
+    artifact_id = request.path_params["artifact_id"]
+    action = request.path_params["action"]
+    store = PersonalArtifactStore()
+    try:
+        if action == "approve":
+            artifact = store.approve(artifact_id, user_id)
+        elif action == "activate":
+            artifact = store.activate_for_user(artifact_id, user_id)
+        elif action == "rollback":
+            artifact = store.rollback(artifact_id, user_id)
+        else:
+            return JSONResponse({"error": "Unknown personal artifact action."}, status_code=404)
+        return JSONResponse({"status": artifact["status"], "artifact": artifact})
+    except ValueError as error:
+        return JSONResponse({"error": str(error)}, status_code=422)
+    finally:
+        store.close()
+
+
 async def list_proposals(request: Request):
     if not LOG_PATH.exists():
         return JSONResponse([])
@@ -2130,6 +2288,12 @@ async def apply_proposal_endpoint(request: Request):
 app = Starlette(
     routes=[
         Route("/health", health),
+        Route("/personal/branches", create_personal_branch, methods=["POST"]),
+        Route("/personal/evolve", personal_evolve, methods=["POST"]),
+        Route("/personal/artifacts/validate", validate_personal_artifact_endpoint, methods=["POST"]),
+        Route("/personal/artifacts/{artifact_id}/{action}", personal_artifact_action, methods=["POST"]),
+        Route("/personal/artifacts", create_personal_artifact_endpoint, methods=["POST"]),
+        Route("/personal/artifacts", list_personal_artifacts_endpoint, methods=["GET"]),
         Route("/proposals", list_proposals),
         Route("/proposals/{request_id}", get_proposal),
         Route("/evolve", evolve, methods=["POST"]),
@@ -2142,7 +2306,7 @@ app = Starlette(
             CORSMiddleware,
             allow_origins=["http://localhost:4173", "http://127.0.0.1:4173"],
             allow_methods=["GET", "POST", "OPTIONS"],
-            allow_headers=["Content-Type"],
+            allow_headers=["Content-Type", "X-Darwin-User-Id"],
         )
     ],
 )

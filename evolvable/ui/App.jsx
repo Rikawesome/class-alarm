@@ -250,7 +250,7 @@ export default function App() {
         />
       )}
 
-      <ChatInterface onProposal={proposal => {
+      <ChatInterface personalMode onProposal={proposal => {
         if (proposal.path === 'fast') {
           setPendingProposal(proposal);
         } else {

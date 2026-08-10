@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 from pathlib import Path
 import tempfile
@@ -25,6 +26,7 @@ from server.main import (
     validate_registration_request,
     validate_file_paths,
 )
+from server.personal_store import PersonalArtifactStore, validate_personal_artifact
 
 
 class TestEvolutionServer(unittest.TestCase):
@@ -256,6 +258,109 @@ class TestEvolutionServer(unittest.TestCase):
         auth = classify_provider_error(RuntimeError("403 PERMISSION_DENIED"))
         self.assertEqual(auth["category"], "configuration")
         self.assertFalse(auth["retryable"])
+
+    def test_personal_artifact_store_versions_and_activation(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            store = PersonalArtifactStore(str(Path(temporary_directory) / "personal.db"))
+            try:
+                branch = store.create_branch("user-123")
+                first_content = {"color": "green"}
+                second_content = {"color": "blue"}
+                first_hash = hashlib.sha256(json.dumps(first_content, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                second_hash = hashlib.sha256(json.dumps(second_content, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                first = store.create_artifact(branch["branch_id"], {"kind": "ui-preferences", "version": 1}, first_content, first_hash)
+                second = store.create_artifact(branch["branch_id"], {"kind": "ui-preferences", "version": 1}, second_content, second_hash)
+                self.assertEqual(first["version"], 1)
+                self.assertEqual(second["version"], 2)
+                store.approve(first["artifact_id"], "user-123")
+                activated = store.activate_for_user(first["artifact_id"], "user-123")
+                self.assertEqual(activated["status"], "active")
+                self.assertEqual(store.list_artifacts(branch["branch_id"])[0]["version"], 2)
+            finally:
+                store.close()
+
+    def test_personal_artifact_validation_rejects_hash_drift(self):
+        with self.assertRaisesRegex(ValueError, "hash"):
+            validate_personal_artifact({"kind": "ui-widget", "version": 1}, {"label": "x"}, "wrong")
+
+    def test_personal_branch_and_artifact_routes_are_user_scoped(self):
+        with tempfile.TemporaryDirectory() as temporary_directory, patch.dict(
+            os.environ,
+            {"DARWIN_PERSONAL_ARTIFACT_DB_PATH": str(Path(temporary_directory) / "artifacts.db")},
+        ):
+            content = {"label": "Focus"}
+            content_hash = hashlib.sha256(json.dumps(content, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            with TestClient(app) as client:
+                self.assertEqual(client.post("/personal/branches").status_code, 401)
+                branch_response = client.post("/personal/branches", headers={"x-darwin-user-id": "user-a"})
+                self.assertEqual(branch_response.status_code, 200)
+                branch = branch_response.json()["branch"]
+                validation = client.post(
+                    "/personal/artifacts/validate",
+                    headers={"x-darwin-user-id": "user-a"},
+                    json={"manifest": {"kind": "ui-widget", "version": 1}, "content": content, "content_hash": content_hash},
+                )
+                self.assertEqual(validation.status_code, 200)
+                created = client.post(
+                    "/personal/artifacts",
+                    headers={"x-darwin-user-id": "user-a"},
+                    json={"branch_id": branch["branch_id"], "manifest": {"kind": "ui-widget", "version": 1}, "content": content, "content_hash": content_hash},
+                )
+                self.assertEqual(created.status_code, 201)
+                artifact_id = created.json()["artifact"]["artifact_id"]
+                approved = client.post(
+                    f"/personal/artifacts/{artifact_id}/approve",
+                    headers={"x-darwin-user-id": "user-a"},
+                )
+                self.assertEqual(approved.status_code, 200)
+                activated = client.post(
+                    f"/personal/artifacts/{artifact_id}/activate",
+                    headers={"x-darwin-user-id": "user-a"},
+                )
+                self.assertEqual(activated.status_code, 200)
+                self.assertEqual(activated.json()["status"], "active")
+                other_user = client.get(
+                    "/personal/artifacts?branch_id=" + branch["branch_id"],
+                    headers={"x-darwin-user-id": "user-b"},
+                )
+                self.assertEqual(other_user.status_code, 404)
+
+    @patch("server.main.get_gemini_client")
+    def test_personal_evolve_creates_validated_draft(self, mock_get_client):
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = json.dumps({
+            "manifest_json": json.dumps({"kind": "ui-preferences", "version": 1}),
+            "content_json": json.dumps({"accent": "green"}),
+        })
+        mock_client.models.generate_content.return_value = mock_response
+        mock_get_client.return_value = mock_client
+        with tempfile.TemporaryDirectory() as temporary_directory, patch.dict(
+            os.environ,
+            {"DARWIN_PERSONAL_ARTIFACT_DB_PATH": str(Path(temporary_directory) / "artifacts.db")},
+        ):
+            with TestClient(app) as client:
+                response = client.post(
+                    "/personal/evolve",
+                    headers={"x-darwin-user-id": "user-shadow"},
+                    json={"text": "Use a calmer green accent."},
+                )
+            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.json()["status"], "draft")
+            self.assertEqual(response.json()["artifact"]["status"], "draft")
+
+    def test_personal_evolve_cors_preflight_allows_user_identity_header(self):
+        with TestClient(app) as client:
+            response = client.options(
+                "/personal/evolve",
+                headers={
+                    "Origin": "http://localhost:4173",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type,x-darwin-user-id",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("X-Darwin-User-Id", response.headers.get("access-control-allow-headers", ""))
 
     def test_fast_path_classification(self):
         fast_proposal = ProposalOutput(
